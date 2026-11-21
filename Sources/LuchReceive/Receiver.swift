@@ -82,6 +82,8 @@ final class ControlServer {
     private var audio: AudioSession?
     private var current: Control?
     private var statsThread: Thread?
+    private var idleSeconds = 0
+    private var askedKeyframe = false
     private var registerRef: DNSServiceRef?
 
     init(name: String, id: String, sink: VideoSink) {
@@ -274,6 +276,24 @@ final class ControlServer {
                 guard let session = server.session, let control = server.current else { break }
                 let stats = session.takeStats()
                 server.owner?.onStats?(stats)
+
+                // Silence watchdog: ask for a keyframe first, give up only after ten quiet seconds.
+                if stats.fps == 0 {
+                    server.idleSeconds += 1
+                    if server.idleSeconds == 5, !server.askedKeyframe {
+                        server.askedKeyframe = true
+                        control.send(["t": "keyframe"])
+                        log("viewer: quiet for 5 s, asked for a keyframe")
+                    }
+                    if server.idleSeconds >= 10 {
+                        log("viewer: the sender went quiet, ending the session")
+                        server.endSession()
+                        return
+                    }
+                } else {
+                    server.idleSeconds = 0
+                    server.askedKeyframe = false
+                }
                 if stats.fps > 0, stats.decodeMs > 0 {
                     // Remember what this Mac really measured, so the next welcome carries a benchmark.
                     UserDefaults.standard.set(stats.decodeMs, forKey: "decode.\(session.codecMime)")

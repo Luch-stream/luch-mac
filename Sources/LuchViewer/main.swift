@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var videoView: VideoView!
     private var statsLabel: NSTextField!
     private var statsItem: NSMenuItem!
+    private var topItem: NSMenuItem!
     private var statusItem: NSStatusItem!
     private var receiver: Receiver!
     private var acceptItem: NSMenuItem!
@@ -117,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = container
         window.backgroundColor = .black
         window.center()
+        window.setFrameAutosaveName("LuchViewerWindow")
         window.makeKeyAndOrderFront(nil)
         window.orderOut(nil)
     }
@@ -136,6 +138,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acceptItem.target = self
         menu.addItem(acceptItem)
 
+        topItem = NSMenuItem(title: "Always on top", action: #selector(toggleTop), keyEquivalent: "t")
+        topItem.target = self
+        topItem.state = UserDefaults.standard.bool(forKey: "alwaysOnTop") ? .on : .off
+        if topItem.state == .on { window.level = .floating }
+        menu.addItem(topItem)
+
         statsItem = NSMenuItem(title: "Show stats", action: #selector(toggleStats), keyEquivalent: "s")
         statsItem.target = self
         statsItem.state = .off
@@ -154,11 +162,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func update(sender: String?) {
         if let sender {
             window.title = "Luch — \(sender)"
+            NSApp.requestUserAttention(.informationalRequest)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             statusItem.button?.title = "Luch ●"
             statusItem.menu?.item(withTag: 1)?.title = "Mirroring \(sender)"
         } else {
+            window.title = "Luch — waiting for a sender"
             statusItem.button?.title = "Luch"
             statusItem.menu?.item(withTag: 1)?.title = receiver?.accepting == true ? "Waiting for a sender" : "Not accepting"
         }
@@ -170,6 +180,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if receiver.accepting {
             statusItem.menu?.item(withTag: 1)?.title = "Waiting for a sender"
         }
+    }
+
+    @objc private func toggleTop() {
+        let on = !UserDefaults.standard.bool(forKey: "alwaysOnTop")
+        UserDefaults.standard.set(on, forKey: "alwaysOnTop")
+        topItem.state = on ? .on : .off
+        window.level = on ? .floating : .normal
     }
 
     @objc private func toggleStats() {
