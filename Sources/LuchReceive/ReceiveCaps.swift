@@ -83,8 +83,13 @@ public enum ReceiveCaps {
         ]
 
         // No benchmark yet: the decoder list and the preferred codec are enough for both senders.
-        let bench: [String: Any] = ["prefer": hevc ? "video/hevc" : "video/avc",
+        var bench: [String: Any] = ["prefer": hevc ? "video/hevc" : "video/avc",
                                     "res": "\(screen.width > screen.height ? 1920 : 1080)x\(screen.width > screen.height ? 1080 : 1920)"]
+        // Decode times from earlier sessions, so a sender starts from measurements, not guesses.
+        for mime in decoders {
+            let ms = UserDefaults.standard.double(forKey: "decode.\(mime)")
+            if ms > 0 { bench[mime] = ["ms": (ms * 10).rounded() / 10] }
+        }
 
         return [
             "t": "welcome",

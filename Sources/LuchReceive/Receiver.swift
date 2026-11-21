@@ -13,6 +13,7 @@ public final class Receiver {
 
     /// Called when a session starts or ends, for the window title and the menu.
     public var onSession: ((String?) -> Void)?
+    public var onStats: ((VideoSession.Stats) -> Void)?
     public var onError: ((String) -> Void)?
 
     private let sink: VideoSink
@@ -53,7 +54,10 @@ final class Control {
     init(fd: Int32) { self.fd = fd }
 
     func send(_ object: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else {
+            log("viewer: could not serialise \(object.keys)")
+            return
+        }
         var line = data
         line.append(0x0A)
         lock.lock()
@@ -206,8 +210,9 @@ final class ControlServer {
         case "hello":
             let sender = message["name"] as? String ?? "sender"
             log("viewer: hello from \(sender)")
-            control.send(ReceiveCaps.welcome(name: name, id: id,
-                                             accepting: owner?.accepting ?? true))
+            let welcome = ReceiveCaps.welcome(name: name, id: id, accepting: owner?.accepting ?? true)
+            log("viewer: welcome with \(welcome["bench"] ?? "no bench")")
+            control.send(welcome)
         case "start":
             let video = message["video"] as? [String: Any] ?? [:]
             let codecText = video["codec"] as? String ?? "video/avc"
@@ -268,6 +273,11 @@ final class ControlServer {
                 Thread.sleep(forTimeInterval: 1)
                 guard let session = server.session, let control = server.current else { break }
                 let stats = session.takeStats()
+                server.owner?.onStats?(stats)
+                if stats.fps > 0, stats.decodeMs > 0 {
+                    // Remember what this Mac really measured, so the next welcome carries a benchmark.
+                    UserDefaults.standard.set(stats.decodeMs, forKey: "decode.\(session.codecMime)")
+                }
                 control.send(["t": "stats", "decode_ms": (stats.decodeMs * 10).rounded() / 10,
                               "fps": Int(stats.fps), "lost": stats.lost, "dropped": stats.dropped,
                               "decoder": stats.decoder])

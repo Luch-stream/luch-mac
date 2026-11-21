@@ -126,8 +126,11 @@ running it says so instead of opening a second session.
 
 The same package also builds a receiver: `LuchViewer.app` announces itself as `_luch._tcp`, accepts a
 sender's control channel, and shows the incoming picture in a window. Video is decoded by
-`AVSampleBufferDisplayLayer` (H.264 or HEVC); the `🔥`, battery and thermal reporting of the Android
-receiver do not apply here yet, and audio is not played in this first version.
+`VTDecompressionSession` (H.264 or HEVC) and handed to the display layer already decoded, so the
+receiver can report an honest `decode_ms`; those measurements are remembered and offered back to the
+sender as `bench`, so codec choice starts from real numbers. Audio is Opus with packet-loss
+concealment. *Show stats* in the menu bar puts an overlay of fps, decode time, lost and dropped frames
+over the picture.
 
 ```sh
 ./Tools/make-viewer.sh

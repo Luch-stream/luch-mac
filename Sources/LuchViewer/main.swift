@@ -51,7 +51,10 @@ final class VideoView: NSView, VideoSink {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
+    private var container: NSView!
     private var videoView: VideoView!
+    private var statsLabel: NSTextField!
+    private var statsItem: NSMenuItem!
     private var statusItem: NSStatusItem!
     private var receiver: Receiver!
     private var acceptItem: NSMenuItem!
@@ -63,6 +66,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         videoView.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
         receiver = Receiver(name: Host.current().localizedName ?? "Mac", sink: videoView)
+        receiver.onStats = { [weak self] stats in
+            DispatchQueue.main.async {
+                guard let label = self?.statsLabel else { return }
+                label.stringValue = String(format: "%@  %.0f fps · dec %.1f ms · lost %d · dropped %d",
+                                           label.isHidden ? "" : "", stats.fps, stats.decodeMs,
+                                           stats.lost, stats.dropped)
+            }
+        }
         receiver.onSession = { [weak self] sender in
             DispatchQueue.main.async {
                 self?.update(sender: sender)
@@ -84,12 +95,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - UI
 
     private func buildWindow() {
-        videoView = VideoView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720))
+        container = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720))
+        videoView = VideoView(frame: container.bounds)
+        videoView.autoresizingMask = [.width, .height]
+        container.addSubview(videoView)
+
+        statsLabel = NSTextField(labelWithString: "")
+        statsLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        statsLabel.textColor = .white
+        statsLabel.wantsLayer = true
+        statsLabel.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+        statsLabel.frame = NSRect(x: 16, y: container.bounds.height - 34, width: 420, height: 20)
+        statsLabel.autoresizingMask = [.minYMargin, .width]
+        statsLabel.isHidden = true
+        container.addSubview(statsLabel)
+
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         window.title = "Luch — waiting for a sender"
-        window.contentView = videoView
+        window.contentView = container
         window.backgroundColor = .black
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -110,6 +135,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acceptItem.state = .on
         acceptItem.target = self
         menu.addItem(acceptItem)
+
+        statsItem = NSMenuItem(title: "Show stats", action: #selector(toggleStats), keyEquivalent: "s")
+        statsItem.target = self
+        statsItem.state = .off
+        menu.addItem(statsItem)
 
         let full = NSMenuItem(title: "Toggle full screen", action: #selector(toggleFullScreen), keyEquivalent: "f")
         full.target = self
@@ -140,6 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if receiver.accepting {
             statusItem.menu?.item(withTag: 1)?.title = "Waiting for a sender"
         }
+    }
+
+    @objc private func toggleStats() {
+        statsLabel.isHidden.toggle()
+        statsItem.state = statsLabel.isHidden ? .off : .on
     }
 
     @objc private func toggleFullScreen() {

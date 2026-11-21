@@ -23,6 +23,8 @@ public final class VideoSession {
     private let height: Int
     private let fps: Int
     private let codec: AnnexB.Codec
+    /// The MIME type this session decodes, for the benchmark memory.
+    public var codecMime: String { codec == .hevc ? "video/hevc" : "video/avc" }
 
     private var videoFD: Int32 = -1
     private var audioFD: Int32 = -1
@@ -30,6 +32,7 @@ public final class VideoSession {
     var audioSocket: Int32 { audioFD }
     private var running = true
 
+    private let decoder = VideoDecoder()
     private var format: CMVideoFormatDescription?
     private var lastParameterSets: [[UInt8]] = []
     private var needKeyframe = true
@@ -46,7 +49,8 @@ public final class VideoSession {
     private var framesIn = 0
     private var lostCount = 0
     private var droppedCount = 0
-    private var decodeUsSum: UInt64 = 0
+    private var decodeMsSum: Double = 0
+    private var decodeSamples = 0
     private var datagrams = 0
     private var completed = 0
 
@@ -62,6 +66,14 @@ public final class VideoSession {
         let audio = try Self.openSocket()
         self.audioFD = audio.fd
         self.audioPort = audio.port
+        decoder.onDecoded = { [weak self] image in self?.sink.enqueue(image) }
+        decoder.onDecodeTime = { [weak self] ms in
+            guard let self, ms >= 0 else { return }
+            self.lock.lock()
+            self.decodeMsSum += ms
+            self.decodeSamples += 1
+            self.lock.unlock()
+        }
     }
 
     public struct Stats {
@@ -76,15 +88,17 @@ public final class VideoSession {
     public func takeStats() -> Stats {
         lock.lock()
         let frames = framesIn
-        let sum = decodeUsSum
+        let sum = decodeMsSum
+        let samples = decodeSamples
         let lost = lostCount
         let dropped = droppedCount
         framesIn = 0
         lostCount = 0
         droppedCount = 0
-        decodeUsSum = 0
+        decodeMsSum = 0
+        decodeSamples = 0
         lock.unlock()
-        let ms = frames > 0 ? Double(sum) / Double(frames) / 1000.0 : 0
+        let ms = samples > 0 ? sum / Double(samples) : 0
         return Stats(decodeMs: ms, fps: Double(frames), lost: lost, dropped: dropped, decoder: decoderName)
     }
 
@@ -95,6 +109,7 @@ public final class VideoSession {
 
     public func stop() {
         running = false
+        decoder.reset()
         if videoFD >= 0 { close(videoFD); videoFD = -1 }
         if audioFD >= 0 { close(audioFD); audioFD = -1 }
     }
@@ -208,13 +223,11 @@ public final class VideoSession {
             lock.lock(); droppedCount += 1; lock.unlock()
             return
         }
-        sink.enqueue(sampleBuffer)
+        decoder.decode(sampleBuffer, format: format)
         completed += 1
         needKeyframe = false
-        let elapsed = DispatchTime.now().uptimeNanoseconds - started
         lock.lock()
         framesIn += 1
-        decodeUsSum += elapsed / 1000
         lock.unlock()
     }
 }
