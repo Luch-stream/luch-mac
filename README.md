@@ -79,6 +79,14 @@ The sender **shows** them and never lowers the quality behind the user's back: t
 note while the client runs on its own battery. The receiver reports these on change only, never by
 polling.
 
+## Audio
+
+Opus, 48 kHz stereo, CBR, in-band FEC on by default (5% loss target) so a lost packet is rebuilt from
+the next one instead of concealed. *Audio bitrate* (64/96/128/192 kbit/s) and *Audio frames* (10 or
+20 ms) are menu settings; 10 ms halves the encoder's contribution to latency at the same payload rate,
+10 ms also doubles the packet count (100/s). The viewer decodes with libopus, conceals gaps with the
+decoder's PLC, and plays through `AVAudioEngine`.
+
 ## Use
 
 Menu bar: pick a receiver → **Mirror Screen**. While streaming the menu shows the estimated latency

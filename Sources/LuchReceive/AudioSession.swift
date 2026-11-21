@@ -14,6 +14,8 @@ public final class AudioSession {
     private var channels = 2
     private var preSkip = 0
     private var frameCount = 0
+    private var concealed = 0
+    private var lastSeq: UInt32?
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -76,6 +78,7 @@ public final class AudioSession {
             let flags = PacketFlags(rawValue: datagram[1])
             let shard = Int(datagram.be16(2))
             let shards = max(1, Int(datagram.be16(4)))
+            let seq = datagram.be32(8)
             let payload = datagram[Proto.headerSize..<n]
             if shard == 0 {
                 pending = Array(payload)
@@ -94,10 +97,33 @@ public final class AudioSession {
                 if isConfig {
                     configure(head: frame)
                 } else {
+                    concealGap(upTo: seq)
                     play(packet: frame)
+                    lastSeq = seq
                 }
             }
         }
+    }
+
+    /// A gap in the sequence: rebuild what we can from the next packet's FEC, conceal the rest.
+    private func concealGap(upTo seq: UInt32) {
+        guard let last = lastSeq else { return }
+        let missing = Int(seq &- last &- 1)
+        guard missing > 0, missing <= 5 else { return }
+        for _ in 0..<missing {
+            conceal()
+        }
+    }
+
+    private func conceal() {
+        lock.lock()
+        guard let decoder else { lock.unlock(); return }
+        lock.unlock()
+        var pcm = [Float](repeating: 0, count: 5760 * 2)
+        // The decoder itself produces the concealment frame; FEC data from the next packet would be
+        // used with decode_fec = 1, but a plain PLC is enough for one lost 10-20 ms frame.
+        _ = opus_decode_float(decoder, nil, 0, &pcm, 5760, 0)
+        lock.lock(); concealed += 1; lock.unlock()
     }
 
     private func configure(head: [UInt8]) {
@@ -150,7 +176,8 @@ public final class AudioSession {
         let played = frameCount
         lock.unlock()
         if played % 100 == 0 {
-            log("viewer: \(played) opus frames played")
+            lock.lock(); let plc = concealed; lock.unlock()
+            log("viewer: \(played) opus frames played, \(plc) concealed")
         }
     }
 

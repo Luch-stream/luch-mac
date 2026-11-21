@@ -27,7 +27,8 @@ public final class OpusAudio {
 
     private var frameSamples: Int { sampleRate * frameMs / 1000 } // 240
 
-    public init?(bitrate: Int = Proto.audioBps, frameMs: Int = Proto.audioFrameMs) {
+    public init?(bitrate: Int = Proto.audioBps, frameMs: Int = Proto.audioFrameMs,
+                 fec: Bool = true, lossPercent: Int = 5) {
         self.frameMs = frameMs
         var error: Int32 = 0
         guard let enc = opus_encoder_create(Int32(sampleRate), Int32(channels),
@@ -38,10 +39,16 @@ public final class OpusAudio {
         self.encoder = enc
         _ = luch_opus_set_bitrate(enc, Int32(bitrate))
         _ = luch_opus_set_vbr(enc, 0)
+        if fec {
+            // Redundancy for the previous frame, so a lost packet is recovered instead of concealed.
+            _ = luch_opus_set_fec(enc, 1)
+            _ = luch_opus_set_loss(enc, Int32(lossPercent))
+        }
         var lookahead: Int32 = 0
         _ = luch_opus_lookahead(enc, &lookahead)
         preSkip = UInt16(max(0, min(Int32(UInt16.max), lookahead)))
-        log("audio: Opus \(sampleRate) Hz x\(channels), \(frameMs) ms frames, \(bitrate) bps CBR, pre-skip \(preSkip)")
+        log("audio: Opus \(sampleRate) Hz x\(channels), \(frameMs) ms frames, \(bitrate) bps CBR, "
+            + "pre-skip \(preSkip), FEC \(fec ? "on at \(lossPercent)%" : "off")")
     }
 
     deinit {

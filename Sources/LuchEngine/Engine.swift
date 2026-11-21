@@ -85,6 +85,8 @@ public struct MirrorOptions {
     /// Opus payload rate. 128 kbit/s stereo is transparent enough for desktop audio; 64 is fine on TV
     /// speakers and leaves more room on a busy Wi-Fi link.
     public var audioBitrate = 128_000
+    /// In-band FEC: a lost packet is rebuilt from the next one instead of concealed.
+    public var audioFEC = true
     public var codec: CodecChoice = .auto
     public var fit: FitMode = .crop
     public var profile: VideoProfile?
@@ -294,7 +296,8 @@ public final class Engine {
         wireVideo(encoder)
 
         if audioTx != nil {
-            audio = OpusAudio(bitrate: options.audioBitrate, frameMs: options.audioFrameMs)
+            audio = OpusAudio(bitrate: options.audioBitrate, frameMs: options.audioFrameMs,
+                              fec: options.audioFEC)
             wireAudio()
         }
 

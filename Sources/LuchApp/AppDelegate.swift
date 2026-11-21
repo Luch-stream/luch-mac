@@ -50,6 +50,16 @@ final class Preferences {
         set { defaults.set(min(1, max(0, newValue)), forKey: "warmthLevel") }
     }
 
+    var audioFrameMs: Int {
+        get { defaults.object(forKey: "audioFrameMs") as? Int ?? 20 }
+        set { defaults.set(newValue, forKey: "audioFrameMs") }
+    }
+
+    var audioFEC: Bool {
+        get { defaults.object(forKey: "audioFec") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "audioFec") }
+    }
+
     var audioBitrate: Int {
         get { defaults.object(forKey: "audioBitrate") as? Int ?? 128_000 }
         set { defaults.set(newValue, forKey: "audioBitrate") }
@@ -332,6 +342,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codec.submenu = codecMenu
         menu.addItem(codec)
 
+        let audioFrames = NSMenuItem(title: "Audio frames", action: nil, keyEquivalent: "")
+        let framesMenu = NSMenu()
+        for ms in [10, 20] {
+            let item = NSMenuItem(title: "\(ms) ms", action: #selector(setAudioFrameMs(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = ms
+            item.state = Preferences.shared.audioFrameMs == ms ? .on : .off
+            framesMenu.addItem(item)
+        }
+        audioFrames.submenu = framesMenu
+        menu.addItem(audioFrames)
+
+        let fec = NSMenuItem(title: "Audio FEC", action: #selector(toggleAudioFEC), keyEquivalent: "")
+        fec.target = self
+        fec.state = Preferences.shared.audioFEC ? .on : .off
+        menu.addItem(fec)
+
         let audioBitrate = NSMenuItem(title: "Audio bitrate", action: nil, keyEquivalent: "")
         let audioMenu = NSMenu()
         for kbps in [64, 96, 128, 192] {
@@ -480,6 +507,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         options.sizeMode = sizeModeOverride ?? (SizeMode(rawValue: Preferences.shared.sizeMode) ?? .fit)
         options.preset = presetOverride ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
         options.audioBitrate = audioBitrateOverride ?? Preferences.shared.audioBitrate
+        options.audioFrameMs = Preferences.shared.audioFrameMs
+        options.audioFEC = Preferences.shared.audioFEC
         options.warmth = Preferences.shared.warmth
         if let frameMs = frameMsOverride { options.audioFrameMs = frameMs }
         options.profile = profileOverride
@@ -569,6 +598,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Preferences.shared.warmth = warmth
         engine?.warmth = warmth
         warmPercent?.stringValue = String(format: "%d%%", Int((warmth * 100).rounded()))
+    }
+
+    @objc private func setAudioFrameMs(_ sender: NSMenuItem) {
+        guard let ms = sender.representedObject as? Int else { return }
+        log("app: menu audio frame -> \(ms) ms")
+        Preferences.shared.audioFrameMs = ms
+        restartIfStreaming()
+    }
+
+    @objc private func toggleAudioFEC() {
+        Preferences.shared.audioFEC.toggle()
+        log("app: menu audio fec -> \(Preferences.shared.audioFEC)")
+        restartIfStreaming()
     }
 
     @objc private func setAudioBitrate(_ sender: NSMenuItem) {
