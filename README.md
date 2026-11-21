@@ -114,6 +114,22 @@ Without the app:
 `luchctl` talks to `Luch.app` over `~/Library/Application Support/Luch/control.sock`; if the app is not
 running it says so instead of opening a second session.
 
+## Receiving on a Mac
+
+The same package also builds a receiver: `LuchViewer.app` announces itself as `_luch._tcp`, accepts a
+sender's control channel, and shows the incoming picture in a window. Video is decoded by
+`AVSampleBufferDisplayLayer` (H.264 or HEVC); the `🔥`, battery and thermal reporting of the Android
+receiver do not apply here yet, and audio is not played in this first version.
+
+```sh
+./Tools/make-viewer.sh
+open .build/LuchViewer.app
+luch list                       # the Mac now appears as a receiver
+luch mirror "<Mac name>"        # or pick it from the sender's menu
+```
+
+The viewer needs Local Network access (Bonjour and the control channel), not Screen Recording.
+
 ## Test without a TV
 
 `Tools/fakerecv.py` is the receiver's `testsend.py` in reverse: it answers hello/welcome and start/ready,

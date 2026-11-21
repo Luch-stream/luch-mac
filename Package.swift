@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "luch", targets: ["luch"]),
         .executable(name: "LuchApp", targets: ["LuchApp"]),
         .executable(name: "luchctl", targets: ["luchctl"]),
+        .executable(name: "LuchViewer", targets: ["LuchViewer"]),
         .library(name: "LuchEngine", targets: ["LuchEngine"]),
     ],
     targets: [
@@ -17,9 +18,11 @@ let package = Package(
         .target(name: "LuchMedia", dependencies: ["LuchProto", "COpus"], path: "Sources/LuchMedia"),
         .target(name: "LuchEngine", dependencies: ["LuchProto", "LuchNet", "LuchMedia"], path: "Sources/LuchEngine"),
         .target(name: "LuchLocal", dependencies: ["LuchProto"], path: "Sources/LuchLocal"),
+        .target(name: "LuchReceive", dependencies: ["LuchProto"], path: "Sources/LuchReceive"),
         .executableTarget(name: "luch", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine"], path: "Sources/luch"),
         .executableTarget(name: "LuchApp", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine", "LuchLocal"], path: "Sources/LuchApp"),
         .executableTarget(name: "luchctl", dependencies: ["LuchLocal"], path: "Sources/luchctl"),
+        .executableTarget(name: "LuchViewer", dependencies: ["LuchProto", "LuchReceive"], path: "Sources/LuchViewer"),
         .testTarget(name: "LuchTests", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine"], path: "Tests/LuchTests"),
     ]
 )
