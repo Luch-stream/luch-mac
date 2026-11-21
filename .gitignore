@@ -1,0 +1,5 @@
+.build/
+.spm-cache/
+.mc/
+.swiftpm/
+*.log
