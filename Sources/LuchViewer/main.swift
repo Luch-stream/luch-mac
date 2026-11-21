@@ -20,6 +20,7 @@ final class VideoView: NSView, VideoSink {
 
     override func makeBackingLayer() -> CALayer { displayLayer }
 
+    private let snapshot = Snapshot()
     private var firstSample = true
     private var enqueued = 0
 
@@ -34,6 +35,7 @@ final class VideoView: NSView, VideoSink {
             let error = displayLayer.error?.localizedDescription ?? "none"
             FileHandle.standardError.write(Data("viewer: \(enqueued) samples, layer status \(status) (\(error))\n".utf8))
         }
+        snapshot.maybeSave(sample)
         if displayLayer.status == .failed {
             displayLayer.flush()
             onBroken?()
@@ -123,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let sender {
             window.title = "Luch — \(sender)"
             window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
             statusItem.button?.title = "Luch ●"
             statusItem.menu?.item(withTag: 1)?.title = "Mirroring \(sender)"
         } else {

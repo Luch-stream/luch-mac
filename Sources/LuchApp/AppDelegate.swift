@@ -171,7 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.profileOverride = value
         }
             let wanted = (request["id"] as? String) ?? (request["name"] as? String)
-            let match = receivers.first { $0.id == wanted || $0.name == wanted }
+            // Address too: two receivers can share a display name (the Mac viewer and a phone).
+            let match = receivers.first { $0.id == wanted || $0.name == wanted || $0.address == wanted }
                 ?? (receivers.count == 1 ? receivers[0] : nil)
             guard let receiver = match else { return ["error": "receiver not found"] }
             startMirror(receiver)
