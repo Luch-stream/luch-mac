@@ -139,6 +139,13 @@ python3 Tools/fakerecv.py --seconds 20 --out .tmp/capture.h264 &
 - the client's battery, charging, thermal state and headroom, shown but never acted on silently;
 - `luchctl` over a Unix socket.
 
+## Receiver side
+
+The sender works with an unmodified receiver. A patch with the client-side changes that make it
+better — device state in `welcome`/`stats`, the wider overlay, the heat badge, the session lifecycle
+fix that makes a codec switch instant, letterboxing and the display-mode hint — is in
+[`receiver/`](receiver/README.md).
+
 ## Not yet
 
 - window capture (`SCContentFilter(desktopIndependentWindow:)`), planned next;

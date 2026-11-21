@@ -1,0 +1,839 @@
+diff --git a/PROTOCOL.md b/PROTOCOL.md
+index 2e41027..80d8eeb 100644
+--- a/PROTOCOL.md
++++ b/PROTOCOL.md
+@@ -56,6 +56,8 @@ receiver → {"t":"ready","video_port":P,"audio_port":Q}      or {"t":"error","c
+ receiver → {"t":"keyframe"}                                 an IDR is needed (start, or after a loss)
+ either   → {"t":"stop"} / receiver → {"t":"stop","by":"receiver"}   (Back on the remote)
+ receiver → {"t":"stats","decode_ms":..,"host_ms":..,"fps":..,"lost":..,"dropped":..,"shown_seq":N,"decoder":".."}
++           may also carry "battery" (percent), "charging", "thermal"
++           ("none|light|moderate|severe|critical|emergency|shutdown"), "power_save", "interactive"
+ sender   → {"t":"sender_stats","rtt_ms":..,"host_ms":..,"fps":..,"mbps":..,"encoder":"..","res":"WxH"}
+ ```
+ 
+@@ -92,10 +94,23 @@ again, and again after about RTT + 100 ms if none comes. Of the frames decoded a
+ 
+ - `hw`: read from the hardware, instant. `video`: per MIME type with a hardware decoder, `decoder`, `max` (WxH),
+   `1080p60`, `1080p120`, `2160p30`, `2160p60`, `10bit`, `low_latency` (booleans). `audio`: MIME types with any
+-  decoder. `display`: `modes` ("WxH@Hz"), `hdr`, `game_mode` (minimal post-processing / ALLM).
++  decoder. `display`: `modes` ("WxH@Hz"), `hdr`, `game_mode` (minimal post-processing / ALLM). `device`: a snapshot
++  of `battery`, `charging`, `thermal`, `power_save`, `interactive` (phones and tablets).
++
++The device fields are event-driven: the receiver caches them from system callbacks (a sticky battery
++broadcast, screen on/off, power-save and thermal listeners) and repeats them in `stats` **only when they
++change**. A sender must keep the last value it saw and must not assume the fields are present.
++
++`battery` (percent) and `charge_mah` (milliamp-hours, when the device exposes a charge counter) are sent
++with a hysteresis: only when the counter moved by 100 mAh (or 3 percentage points if there is no counter).
++`charging` is sent immediately when the cable goes in or out, and `thermal`, `power_save` and `interactive`
++on every change, all in the same `stats` line that already flows once a second.
+ - `bench`: measured, or `null` until done. Per video MIME type `{ms, p95, frames, decoder}` (or `{error}`): decode
+   latency at 1920x1080, 60 fps, low-latency configuration, queueInputBuffer → output. `prefer`: the MIME type to
+-  encode for (fastest; an earlier entry in avc, hevc, vp9, av1 wins unless a later one is 0.5 ms faster).
++  encode for, chosen by a weighted score rather than raw speed: each codec gets a compression-efficiency
++  credit (AV1 30, HEVC 25, VP9 20, H.264 0) minus 2 points per millisecond of measured decode latency.
++  `bench[mime].score` carries that number, and `bench.weights` describes the formula. A sender that cannot
++  encode `prefer` falls back to its own judgement.
+ 
+ The receiver measures by itself after install, an app update or a firmware update, and at a sender's first hello
+ when there is no result yet, but only while nothing plays (a video would lose its decoder); then it sends
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 396bc86..6a21206 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -19,7 +19,7 @@ android {
+         applicationId 'ru.toxblh.luch'
+         minSdk 26
+         targetSdk 34
+-        versionCode 2
++        versionCode 3
+         versionName '0.2'
+     }
+ 
+diff --git a/android/app/src/main/java/ru/toxblh/luch/Bench.java b/android/app/src/main/java/ru/toxblh/luch/Bench.java
+index 7e48473..c3d725d 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/Bench.java
++++ b/android/app/src/main/java/ru/toxblh/luch/Bench.java
+@@ -41,8 +41,19 @@ final class Bench {
+             {"video/x-vnd.on2.vp9", "bench/vp9.ivf"},
+             {"video/av01", "bench/av1.ivf"},
+     };
+-    /** Codecs in order of preference when they decode about as fast: the more senders can encode it, the better. */
+-    private static final List<String> ORDER = Arrays.asList("video/avc", "video/hevc", "video/x-vnd.on2.vp9", "video/av01");
++    /**
++     * What a codec is worth beyond raw speed: compression efficiency, in the same units the measured
++     * latency is scored with (2 points per millisecond). HEVC needs ~25% less bitrate than H.264 for
++     * the same picture, AV1 a little less still, VP9 sits between; H.264 is the baseline.
++     */
++    private static final java.util.Map<String, Double> EFFICIENCY = new java.util.HashMap<>();
++    static {
++        EFFICIENCY.put("video/av01", 30.0);
++        EFFICIENCY.put("video/hevc", 25.0);
++        EFFICIENCY.put("video/x-vnd.on2.vp9", 20.0);
++        EFFICIENCY.put("video/avc", 0.0);
++    }
++    private static final double PER_MS = 2.0;
+     private static final int W = 1920, H = 1080, FPS = 60;
+     /** The first frames include the decoder warming up; they are not counted. */
+     private static final int WARMUP = 5;
+@@ -101,7 +112,7 @@ final class Bench {
+         try {
+             JSONObject result = new JSONObject();
+             String best = null;
+-            double bestMs = Double.MAX_VALUE;
++            double bestScore = -Double.MAX_VALUE;
+             for (String[] clip : CLIPS) {
+                 String mime = clip[0];
+                 if (LowLatencyDecoder.hardwareDecoder(mime) == null) continue;
+@@ -112,18 +123,22 @@ final class Bench {
+                     Log.w(LuchService.TAG, "bench " + mime, e);
+                     r = new JSONObject().put("error", String.valueOf(e));
+                 }
+-                result.put(mime, r);
+                 double ms = r.optDouble("ms", Double.NaN);
+                 if (!Double.isNaN(ms)) {
+-                    // A codec later in the list has to be clearly faster (0.5 ms) to win.
+-                    if (best == null || ms < bestMs - 0.5) {
++                    // Cheap to decode and cheap on the wire: the receiver recommends the best trade-off,
++                    // not merely the fastest decoder.
++                    double score = EFFICIENCY.getOrDefault(mime, 0.0) - PER_MS * ms;
++                    r.put("score", Math.round(score * 10.0) / 10.0);
++                    if (best == null || score > bestScore) {
+                         best = mime;
+-                        bestMs = ms;
++                        bestScore = score;
+                     }
+                 }
++                result.put(mime, r);
+                 Log.i(LuchService.TAG, "bench " + mime + ": " + r);
+             }
+             result.put("prefer", best == null ? JSONObject.NULL : best);
++            result.put("weights", "efficiency av01=30 hevc=25 vp9=20 avc=0; per_ms=" + PER_MS);
+             result.put("res", W + "x" + H);
+             result.put("key", key(context));
+             prefs(context).edit().putString("bench", result.toString()).apply();
+diff --git a/android/app/src/main/java/ru/toxblh/luch/Caps.java b/android/app/src/main/java/ru/toxblh/luch/Caps.java
+index 0d94a5a..44bc577 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/Caps.java
++++ b/android/app/src/main/java/ru/toxblh/luch/Caps.java
+@@ -1,12 +1,15 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ package ru.toxblh.luch;
+ 
++import android.app.UiModeManager;
+ import android.content.Context;
++import android.content.res.Configuration;
+ import android.hardware.display.DisplayManager;
+ import android.media.MediaCodecInfo;
+ import android.media.MediaCodecList;
+ import android.os.Build;
+ import android.view.Display;
++import android.view.Surface;
+ 
+ import org.json.JSONArray;
+ import org.json.JSONException;
+@@ -29,6 +32,7 @@ final class Caps {
+             out.put("video", video());
+             out.put("audio", audio());
+             out.put("display", display(context));
++            out.put("device", DeviceState.snapshot(context));
+         } catch (JSONException ignored) {
+         }
+         return out;
+@@ -96,6 +100,14 @@ final class Caps {
+         return new JSONArray(types);
+     }
+ 
++    /** Tell a TV from a phone or a tablet: the sender adapts its stream to handhelds, not to TVs. */
++    private static String deviceType(Context context) {
++        UiModeManager ui = context.getSystemService(UiModeManager.class);
++        if (ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) return "tv";
++        int smallestWidthDp = context.getResources().getConfiguration().smallestScreenWidthDp;
++        return smallestWidthDp >= 600 ? "tablet" : "phone";
++    }
++
+     private static JSONObject display(Context context) throws JSONException {
+         JSONObject out = new JSONObject();
+         Display d = context.getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+@@ -105,6 +117,17 @@ final class Caps {
+             modes.put(m.getPhysicalWidth() + "x" + m.getPhysicalHeight() + "@" + Math.round(m.getRefreshRate()));
+         }
+         out.put("modes", modes);
++        // What the client would render into right now: mode with the rotation applied, and the rate.
++        Display.Mode current = d.getMode();
++        int cw = current.getPhysicalWidth(), ch = current.getPhysicalHeight();
++        int rotation = d.getRotation();
++        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
++            int swap = cw; cw = ch; ch = swap;
++        }
++        out.put("current", cw + "x" + ch + "@" + Math.round(current.getRefreshRate()));
++        out.put("rotation", rotation * 90);
++        out.put("refresh", Math.round(d.getRefreshRate()));
++        out.put("type", deviceType(context));
+         JSONArray hdr = new JSONArray();
+         Display.HdrCapabilities h = d.getHdrCapabilities();
+         if (h != null) {
+diff --git a/android/app/src/main/java/ru/toxblh/luch/DeviceState.java b/android/app/src/main/java/ru/toxblh/luch/DeviceState.java
+new file mode 100644
+index 0000000..76e353c
+--- /dev/null
++++ b/android/app/src/main/java/ru/toxblh/luch/DeviceState.java
+@@ -0,0 +1,239 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package ru.toxblh.luch;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.os.BatteryManager;
++import android.os.Build;
++import android.os.PowerManager;
++
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * Battery, charging, thermal and power-save state for senders.
++ *
++ * Event-driven only: values are cached from system callbacks (a sticky battery broadcast, screen
++ * on/off, power-save and thermal listeners) and are sent <em>when they change</em>. Nothing here
++ * polls the fuel gauge, so reporting costs no battery of its own.
++ */
++final class DeviceState {
++    private static final Object LOCK = new Object();
++
++    /** Report a battery change only when the charge counter moved by this much. */
++    private static final int TOLERANCE_MAH = 100;
++    /** Fallback when the device exposes no charge counter: percentage points. */
++    private static final int TOLERANCE_PERCENT = 3;
++
++    private static int battery = -1;
++    private static int chargeMah = -1;
++    private static boolean charging;
++    private static boolean powerSave;
++    private static boolean interactive = true;
++    private static String thermal = "none";
++
++    // Last values handed to a sender, so `changed()` can report deltas only.
++    private static int sentBattery = Integer.MIN_VALUE;
++    private static int sentChargeMah = Integer.MIN_VALUE;
++    private static boolean sentCharging;
++    private static boolean sentPowerSave;
++    private static boolean sentInteractive = true;
++    private static String sentThermal = "";
++
++    private static BroadcastReceiver receiver;
++    private static BatteryManager batteryManager;
++    /** PowerManager.OnThermalStatusChangedListener on API 29+, kept as Object so older devices never resolve it. */
++    private static Object thermalListener;
++
++    private DeviceState() {
++    }
++
++    static void attach(Context context) {
++        if (receiver != null) return;
++        Context app = context.getApplicationContext();
++        receiver = new BroadcastReceiver() {
++            @Override
++            public void onReceive(Context c, Intent intent) {
++                String action = intent.getAction();
++                if (Intent.ACTION_BATTERY_CHANGED.equals(action)) {
++                    applyBattery(intent);
++                } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
++                    synchronized (LOCK) { interactive = true; }
++                } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
++                    synchronized (LOCK) { interactive = false; }
++                } else if (PowerManager.ACTION_POWER_SAVE_MODE_CHANGED.equals(action)) {
++                    PowerManager pm = app.getSystemService(PowerManager.class);
++                    if (pm != null) synchronized (LOCK) { powerSave = pm.isPowerSaveMode(); }
++                }
++            }
++        };
++        IntentFilter filter = new IntentFilter();
++        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
++        filter.addAction(Intent.ACTION_SCREEN_ON);
++        filter.addAction(Intent.ACTION_SCREEN_OFF);
++        filter.addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
++        // A sticky broadcast hands back the current battery state immediately: no polling needed.
++        batteryManager = app.getSystemService(BatteryManager.class);
++        Intent sticky = app.registerReceiver(receiver, filter);
++        if (sticky != null) applyBattery(sticky);
++
++        PowerManager pm = app.getSystemService(PowerManager.class);
++        if (pm != null) {
++            synchronized (LOCK) {
++                powerSave = pm.isPowerSaveMode();
++                interactive = pm.isInteractive();
++            }
++            if (Build.VERSION.SDK_INT >= 29) attachThermal(pm);
++        }
++    }
++
++    static void detach(Context context) {
++        Context app = context.getApplicationContext();
++        if (receiver != null) {
++            try {
++                app.unregisterReceiver(receiver);
++            } catch (RuntimeException ignored) {
++            }
++            receiver = null;
++        }
++        if (thermalListener != null && Build.VERSION.SDK_INT >= 29) detachThermal(app);
++    }
++
++    @android.annotation.TargetApi(29)
++    private static void attachThermal(PowerManager pm) {
++        synchronized (LOCK) { thermal = thermalName(pm.getCurrentThermalStatus()); }
++        PowerManager.OnThermalStatusChangedListener listener = status -> {
++            synchronized (LOCK) { thermal = thermalName(status); }
++        };
++        thermalListener = listener;
++        pm.addThermalStatusListener(listener);
++    }
++
++    @android.annotation.TargetApi(29)
++    private static void detachThermal(Context app) {
++        PowerManager pm = app.getSystemService(PowerManager.class);
++        if (pm != null && thermalListener instanceof PowerManager.OnThermalStatusChangedListener) {
++            try {
++                pm.removeThermalStatusListener((PowerManager.OnThermalStatusChangedListener) thermalListener);
++            } catch (RuntimeException ignored) {
++            }
++        }
++        thermalListener = null;
++    }
++
++    private static void applyBattery(Intent intent) {
++        int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
++        int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
++        int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
++        boolean plugged = status == BatteryManager.BATTERY_STATUS_CHARGING
++                || status == BatteryManager.BATTERY_STATUS_FULL;
++        // Read the counter once per broadcast, not on a timer: it makes the 100 mAh tolerance possible.
++        int microAmpHours = -1;
++        if (batteryManager != null) {
++            try {
++                microAmpHours = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
++            } catch (RuntimeException ignored) {
++            }
++        }
++        synchronized (LOCK) {
++            battery = scale > 0 && level >= 0 ? Math.round(level * 100f / scale) : -1;
++            chargeMah = microAmpHours > 0 ? microAmpHours / 1000 : -1;
++            charging = plugged;
++        }
++    }
++
++    /**
++     * How much thermal headroom is left before throttling: 1 = cool, below ~0.3 means the device is
++     * about to slow down. A cheap binder getter, sampled with the stats rather than on its own timer.
++     */
++    static double headroom(Context context) {
++        if (Build.VERSION.SDK_INT < 30) return -1;
++        PowerManager pm = context.getSystemService(PowerManager.class);
++        if (pm == null) return -1;
++        try {
++            float value = pm.getThermalHeadroom(10);
++            return Float.isNaN(value) ? -1 : value;
++        } catch (RuntimeException e) {
++            return -1;
++        }
++    }
++
++    /** One-time reading for `welcome.hw.device`. */
++    static JSONObject snapshot() {
++        return snapshot(null);
++    }
++
++    static JSONObject snapshot(Context context) {
++        JSONObject out = new JSONObject();
++        Double headroomValue = context == null ? null : DeviceState.headroom(context);
++        if (headroomValue != null && headroomValue < 0) headroomValue = null;
++        synchronized (LOCK) {
++            try {
++                if (battery >= 0) out.put("battery", battery);
++                if (chargeMah >= 0) out.put("charge_mah", chargeMah);
++                out.put("charging", charging);
++                out.put("thermal", thermal);
++                if (headroomValue != null) out.put("headroom", headroomValue);
++                out.put("power_save", powerSave);
++                out.put("interactive", interactive);
++            } catch (JSONException ignored) {
++            }
++        }
++        return out;
++    }
++
++    /** Fields that changed since the previous call; empty when nothing did. Call once per stats tick. */
++    static JSONObject changed() {
++        JSONObject out = new JSONObject();
++        synchronized (LOCK) {
++            try {
++                boolean batteryMoved = chargeMah >= 0 && sentChargeMah != Integer.MIN_VALUE
++                        && Math.abs(chargeMah - sentChargeMah) >= TOLERANCE_MAH;
++                boolean percentMoved = chargeMah < 0 && sentBattery != Integer.MIN_VALUE
++                        && battery >= 0 && Math.abs(battery - sentBattery) >= TOLERANCE_PERCENT;
++                boolean first = sentChargeMah == Integer.MIN_VALUE && sentBattery == Integer.MIN_VALUE;
++                if (battery >= 0 && (first || batteryMoved || percentMoved)) {
++                    out.put("battery", battery);
++                    if (chargeMah >= 0) out.put("charge_mah", chargeMah);
++                    sentBattery = battery;
++                    sentChargeMah = chargeMah;
++                }
++                // Plugging or unplugging the cable is worth a message on its own, whatever the level.
++                if (charging != sentCharging) {
++                    out.put("charging", charging);
++                    sentCharging = charging;
++                }
++                if (!thermal.equals(sentThermal)) {
++                    out.put("thermal", thermal);
++                    sentThermal = thermal;
++                }
++                if (powerSave != sentPowerSave) {
++                    out.put("power_save", powerSave);
++                    sentPowerSave = powerSave;
++                }
++                if (interactive != sentInteractive) {
++                    out.put("interactive", interactive);
++                    sentInteractive = interactive;
++                }
++            } catch (JSONException ignored) {
++            }
++        }
++        return out;
++    }
++
++    private static String thermalName(int status) {
++        if (Build.VERSION.SDK_INT < 29) return "none";
++        switch (status) {
++            case PowerManager.THERMAL_STATUS_NONE: return "none";
++            case PowerManager.THERMAL_STATUS_LIGHT: return "light";
++            case PowerManager.THERMAL_STATUS_MODERATE: return "moderate";
++            case PowerManager.THERMAL_STATUS_SEVERE: return "severe";
++            case PowerManager.THERMAL_STATUS_CRITICAL: return "critical";
++            case PowerManager.THERMAL_STATUS_EMERGENCY: return "emergency";
++            case PowerManager.THERMAL_STATUS_SHUTDOWN: return "shutdown";
++            default: return "unknown";
++        }
++    }
++}
+diff --git a/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java b/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
+index f87a38f..6004752 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
++++ b/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
+@@ -47,6 +47,7 @@ final class LowLatencyDecoder {
+         keys.add("priority");
+         if (Build.VERSION.SDK_INT >= 30) keys.add(MediaFormat.KEY_LOW_LATENCY);
+         keys.add("vdec-lowlatency");   // MediaTek and Amlogic, outside the vendor namespace
++        keys.add("max-num-reorder-frames"); // 0 = no reordering depth on top of "no B-frames"
+         List<String> supportedVendor = null;
+         if (Build.VERSION.SDK_INT >= 31) {
+             try {
+@@ -67,6 +68,8 @@ final class LowLatencyDecoder {
+                 if (k.equals("priority")) {
+                     if (qualcomm || operatingRate) f.setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE);
+                     if (!qualcomm) f.setInteger(MediaFormat.KEY_PRIORITY, 0);
++                } else if (k.equals("max-num-reorder-frames")) {
++                    f.setInteger(k, 0);
+                 } else {
+                     f.setInteger(k, 1);
+                 }
+diff --git a/android/app/src/main/java/ru/toxblh/luch/LuchService.java b/android/app/src/main/java/ru/toxblh/luch/LuchService.java
+index 4d93e75..a2c1a6d 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/LuchService.java
++++ b/android/app/src/main/java/ru/toxblh/luch/LuchService.java
+@@ -45,6 +45,8 @@ public class LuchService extends Service {
+     @Override
+     public void onCreate() {
+         super.onCreate();
++        // Battery, charging and thermal: cached from system callbacks, reported only on change.
++        DeviceState.attach(this);
+         goForeground();
+         nsd = getSystemService(NsdManager.class);
+         server = new ControlServer(this);
+@@ -75,6 +77,7 @@ public class LuchService extends Service {
+         } catch (RuntimeException ignored) {
+         }
+         if (server != null) server.stop();
++        DeviceState.detach(this);
+         super.onDestroy();
+     }
+ 
+diff --git a/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java b/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
+index 0b72489..03fc1ac 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
++++ b/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
+@@ -3,6 +3,9 @@ package ru.toxblh.luch;
+ 
+ import android.app.Activity;
+ import android.net.wifi.WifiManager;
++import android.content.Context;
++import android.content.Intent;
++import android.view.Display;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.content.SharedPreferences;
+@@ -17,12 +20,21 @@ import android.view.WindowManager;
+ import android.widget.FrameLayout;
+ import android.widget.TextView;
+ 
++import android.view.View;
++
+ /**
+  * The picture of a mirroring session: a full-screen SurfaceView (not a TextureView: one copy and one frame less),
+  * Wi-Fi held in low-latency mode while it is up. Back, Home or another app on top ends the session.
+  */
+ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+     private static volatile MirrorActivity shown;
++    /** What the picture is actually being rendered into, for the stats overlay. */
++    private static volatile String surfaceInfo = "?";
++    private FitSurfaceView surfaceView;
++    /** Always-visible "the device is hot" badge, independent of the debug overlay. */
++    private static volatile TextView hotBadge;
++    /** The session this screen is showing; a newer one must not be stopped by this screen's teardown. */
++    private MirrorSession session;
+     private WifiManager.WifiLock wifiLock;
+     private TextView stats;
+     private boolean statsOn;
+@@ -33,11 +45,13 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+         // Ask the display for its game mode: the least picture processing, the least delay (Moonlight does the same).
+         if (Build.VERSION.SDK_INT >= 30) getWindow().setPreferMinimalPostProcessing(true);
+-        SurfaceView view = new SurfaceView(this);
+-        view.getHolder().addCallback(this);
++        surfaceView = new FitSurfaceView(this);
++        surfaceView.getHolder().addCallback(this);
+         FrameLayout root = new FrameLayout(this);
+-        root.addView(view, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+-                FrameLayout.LayoutParams.MATCH_PARENT));
++        FrameLayout.LayoutParams videoParams = new FrameLayout.LayoutParams(
++                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
++        videoParams.gravity = Gravity.CENTER;
++        root.addView(surfaceView, videoParams);
+         // Moonlight-style statistics in the corner, toggled with OK (or Info / Menu) and remembered.
+         stats = new TextView(this);
+         stats.setTypeface(Typeface.MONOSPACE);
+@@ -57,7 +71,24 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+         shown = this;
+-        if (MirrorSession.current == null) finish();
++        requestFastDisplay();
++
++        TextView badge = new TextView(this);
++        // Just the icon: the text version was too loud for a permanent badge.
++        badge.setText("🔥");
++        badge.setContentDescription(getString(R.string.hot_badge));
++        badge.setTextSize(22);
++        badge.setTextColor(0xFFFFD9A0);
++        badge.setBackgroundColor(0xCC3A2A12);
++        badge.setPadding(pad, pad / 3, pad, pad / 3);
++        FrameLayout.LayoutParams badgeParams = new FrameLayout.LayoutParams(
++                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
++        badgeParams.gravity = Gravity.TOP | Gravity.END;
++        badgeParams.setMargins(0, pad * 2, pad * 2, 0);
++        badge.setVisibility(View.GONE);
++        root.addView(badge, badgeParams);
++        hotBadge = badge;
++        bindSession();
+     }
+ 
+     @Override
+@@ -79,15 +110,71 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         super.onPause();
+     }
+ 
++    /** Ask the panel for its highest refresh rate: the display adds up to a frame period on top of decode. */
++    private void requestFastDisplay() {
++        Display d = getDisplay();
++        if (d == null) return;
++        int fastest = 0;
++        int fastestMode = 0;
++        int nativeWidth = d.getMode().getPhysicalWidth();
++        for (Display.Mode mode : d.getSupportedModes()) {
++            int hz = Math.round(mode.getRefreshRate());
++            // The panel's native width at its highest rate: a mode the system can switch to without a resize.
++            if (hz > fastest && mode.getPhysicalWidth() == nativeWidth) {
++                fastest = hz;
++                fastestMode = mode.getModeId();
++            }
++        }
++        if (fastest <= 0) return;
++        WindowManager.LayoutParams lp = getWindow().getAttributes();
++        lp.preferredRefreshRate = fastest;
++        lp.preferredDisplayModeId = fastestMode;
++        getWindow().setAttributes(lp);
++    }
++
++    /** Turns the always-on heat warning on or off; the debug overlay is a separate thing. */
++    static void setHot(boolean hot) {
++        TextView badge = hotBadge;
++        if (badge == null) return;
++        badge.post(() -> badge.setVisibility(hot ? View.VISIBLE : View.GONE));
++    }
++
+     /** Leaving the screen in any way ends the session, so the sender stops capturing. */
+     @Override
+     protected void onStop() {
+         android.util.Log.i(LuchService.TAG, "mirror screen stopped, finishing=" + isFinishing());
+-        MirrorSession s = MirrorSession.current;
+-        if (s != null && !s.ended()) s.stopByUser();
++        // Only the session this screen was showing: a rebuilt screen must not kill its successor.
++        MirrorSession s = session;
++        if (s != null && !s.ended() && s == MirrorSession.current) s.stopByUser();
+         super.onStop();
+     }
+ 
++    @Override
++    protected void onNewIntent(Intent intent) {
++        super.onNewIntent(intent);
++        setIntent(intent);
++        bindSession();
++    }
++
++    /** Points this screen at the current session and hands it the surface again after a rebuild. */
++    private void bindSession() {
++        session = MirrorSession.current;
++        MirrorSession s = session;
++        if (s == null) {
++            finish();
++            return;
++        }
++        if (surfaceView != null && s.height() > 0) {
++            // Letterbox instead of stretching: the desktop keeps its shape on a 20:9 phone.
++            surfaceView.setAspect(s.width() / (float) s.height());
++            surfaceView.requestLayout();
++        }
++        SurfaceHolder holder = surfaceView == null ? null : surfaceView.getHolder();
++        if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
++            s.setSurface(holder.getSurface());
++        }
++    }
++
+     @Override
+     protected void onDestroy() {
+         if (shown == this) shown = null;
+@@ -131,27 +218,62 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         if (a != null) a.runOnUiThread(a::finish);
+     }
+ 
++    /** A SurfaceView that keeps the stream's aspect ratio inside the screen, with bars. */
++    private static final class FitSurfaceView extends SurfaceView {
++        private float aspect = 16f / 9f;
++
++        FitSurfaceView(Context context) {
++            super(context);
++        }
++
++        void setAspect(float value) {
++            if (value > 0 && Math.abs(value - aspect) > 0.001f) {
++                aspect = value;
++                requestLayout();
++            }
++        }
++
++        @Override
++        protected void onMeasure(int widthSpec, int heightSpec) {
++            int width = MeasureSpec.getSize(widthSpec);
++            int height = MeasureSpec.getSize(heightSpec);
++            if (width > 0 && height > 0) {
++                if (width / (float) height > aspect) {
++                    width = Math.round(height * aspect);
++                } else {
++                    height = Math.round(width / aspect);
++                }
++            }
++            setMeasuredDimension(width, height);
++        }
++    }
++
+     @Override
+     public void surfaceCreated(SurfaceHolder holder) {
+         MirrorSession s = MirrorSession.current;
++        session = s;
+         if (s == null) return;
+         Surface surface = holder.getSurface();
+-        if (Build.VERSION.SDK_INT >= 30) {
+-            try {
+-                surface.setFrameRate(s.fps(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+-            } catch (RuntimeException ignored) {
+-            }
+-        }
++        // Do not pin the panel to the stream rate: at its top refresh the compositor presents a finished
++        // frame at the next 1/120 s boundary instead of waiting for the next 1/60 s one.
+         s.setSurface(surface);
+     }
+ 
+     @Override
+     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
++        Display d = getDisplay();
++        int hz = d == null ? 0 : Math.round(d.getRefreshRate());
++        surfaceInfo = width + "x" + height + (hz > 0 ? "@" + hz + "Hz" : "");
++    }
++
++    /** Rendering surface size and refresh rate, or "?" before the surface exists. */
++    static String surfaceInfo() {
++        return surfaceInfo;
+     }
+ 
+     @Override
+     public void surfaceDestroyed(SurfaceHolder holder) {
+-        MirrorSession s = MirrorSession.current;
++        MirrorSession s = session;
+         if (s != null) s.setSurface(null);
+     }
+ }
+diff --git a/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java b/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
+index ebc5d15..359cb80 100644
+--- a/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
++++ b/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
+@@ -107,16 +107,21 @@ final class MirrorSession {
+     /** Opens both sockets and the screen; returns {video port, audio port}. */
+     static synchronized int[] start(Context context, Control control, JSONObject msg) throws IOException {
+         MirrorSession old = current;
+-        if (old != null) old.end(false);
+         MirrorSession s = new MirrorSession(context, control, msg);
+         s.videoSocket = openSocket();
+         s.audioSocket = openSocket();
++        // The new session becomes current before the old one ends, so ending it knows it was replaced
++        // and leaves the screen (and its Surface) alone: a codec switch must not restart the activity.
+         current = s;
+         thread(s::videoLoop, "luch-video");
+         if (s.audioRate > 0) thread(s::audioLoop, "luch-audio");
+         thread(s::statsLoop, "luch-stats");
++        if (old != null) old.end(false);
++        // SINGLE_TOP + CLEAR_TOP reuse the existing screen (onNewIntent) instead of recreating it,
++        // so switching codec or quality does not tear down the session that just started.
+         context.startActivity(new Intent(context, MirrorActivity.class)
+-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
++                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
++                        | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+         return new int[]{s.videoSocket.getLocalPort(), s.audioSocket.getLocalPort()};
+     }
+ 
+@@ -157,6 +162,14 @@ final class MirrorSession {
+         return fps;
+     }
+ 
++    int width() {
++        return width;
++    }
++
++    int height() {
++        return height;
++    }
++
+     void setSurface(Surface s) {
+         synchronized (surfaceLock) {
+             surface = s;
+@@ -506,20 +519,34 @@ final class MirrorSession {
+         JSONObject s = senderStats;
+         double rtt = s == null ? 0 : s.optDouble("rtt_ms", 0);
+         double host = s != null && s.has("host_ms") ? s.optDouble("host_ms", hostMs) : hostMs;
++        String res = s != null ? s.optString("res", width + "x" + height) : width + "x" + height;
++        String enc = s != null ? s.optString("encoder", "?") : "?";
++        String codec = videoMime.equals("video/hevc") ? "HEVC" : videoMime.equals("video/avc") ? "H.264" : videoMime;
+         StringBuilder b = new StringBuilder();
+         b.append(String.format(java.util.Locale.US, "≈ %.0f ms  host + RTT/2 + decode, display not counted\n",
+                 host + rtt / 2 + decodeMs));
+         b.append(String.format(java.util.Locale.US, "RTT %.1f · host %.1f · decode %.1f ms\n", rtt, host, decodeMs));
++        b.append(String.format(java.util.Locale.US, "stream %d fps %s %s\n", fps, codec, res));
+         if (s != null) {
+-            b.append(String.format(java.util.Locale.US, "send %d fps %.1f Mbit/s · ", s.optInt("fps"),
+-                    s.optDouble("mbps", 0)));
++            b.append(String.format(java.util.Locale.US, "send %d fps %.1f Mbit/s · recv %.1f Mbit/s · shown %d fps\n",
++                    s.optInt("fps"), s.optDouble("mbps", 0), recvMbps, shownFps));
++        } else {
++            b.append(String.format(java.util.Locale.US, "recv %.1f Mbit/s · shown %d fps\n", recvMbps, shownFps));
+         }
+-        b.append(String.format(java.util.Locale.US, "recv %.1f Mbit/s · shown %d fps · lost %d · dropped %d\n",
+-                recvMbps, shownFps, framesLost, framesDropped));
+-        String res = s != null ? s.optString("res", width + "x" + height) : width + "x" + height;
+-        String enc = s != null ? s.optString("encoder", "?") : "?";
+-        b.append(res).append(' ').append(videoMime.equals("video/hevc") ? "HEVC" : "H.264").append(' ')
+-                .append(enc).append(" → ").append(decoderName);
++        b.append(String.format(java.util.Locale.US, "surface %s · lost %d · dropped %d\n",
++                MirrorActivity.surfaceInfo(), framesLost, framesDropped));
++        b.append(enc).append(" → ").append(decoderName).append('\n');
++
++        // Device state is reported by the receiver only when it changes; this is the cached view.
++        JSONObject d = DeviceState.snapshot();
++        int battery = d.optInt("battery", -1);
++        b.append("battery ").append(battery >= 0 ? battery + "%" : "?");
++        b.append(d.optBoolean("charging", false) ? " charging" : " on battery");
++        if (d.optInt("charge_mah", -1) > 0) b.append(" (").append(d.optInt("charge_mah")).append(" mAh)");
++        b.append(" · thermal ").append(d.optString("thermal", "?"));
++        double headroom = d.optDouble("headroom", -1);
++        if (headroom >= 0) b.append(headroom < 0.3 ? " 🔥" : " 🌡").append(String.format(java.util.Locale.US, "%.2f", headroom));
++        b.append(d.optBoolean("interactive", true) ? " · screen on" : " · screen off");
+         return b.toString();
+     }
+ 
+@@ -540,14 +567,26 @@ final class MirrorSession {
+             MirrorActivity.showStats(overlay(decodeMs, hostMs, count, bytes * 8 / 1e6));
+             if (count == 0) continue;
+             try {
+-                control.send(new JSONObject().put("t", "stats")
++                JSONObject s = new JSONObject().put("t", "stats")
+                         .put("decode_ms", Math.round(sum / (double) count / 100.0) / 10.0)
+                         .put("host_ms", hc == 0 ? 0 : Math.round(hs / (double) hc) / 10.0)
+                         .put("fps", count)
+                         .put("lost", framesLost)
+                         .put("dropped", framesDropped)
+                         .put("shown_seq", shownSeq)
+-                        .put("decoder", decoderName));
++                        .put("decoder", decoderName);
++                // Thermal headroom falls before the status does, so a sender can warn early.
++                double headroom = DeviceState.headroom(context);
++                if (headroom >= 0) s.put("thermal_headroom", Math.round(headroom * 100) / 100.0);
++                MirrorActivity.setHot(headroom >= 0 && headroom < 0.3);
++                // Battery, charging and thermal ride along only when they change, never on a timer.
++                JSONObject device = DeviceState.changed();
++                java.util.Iterator<String> keys = device.keys();
++                while (keys.hasNext()) {
++                    String key = keys.next();
++                    s.put(key, device.get(key));
++                }
++                control.send(s);
+             } catch (JSONException ignored) {
+             }
+         }
+@@ -558,6 +597,7 @@ final class MirrorSession {
+             if (ended) return;
+             ended = true;
+         }
++        boolean replaced = MirrorSession.current != null && MirrorSession.current != this;
+         if (byUser) {
+             try {
+                 control.send(new JSONObject().put("t", "stop").put("by", "receiver"));
+@@ -579,7 +619,8 @@ final class MirrorSession {
+         }
+         Log.i(LuchService.TAG, "mirror ended" + (byUser ? " by user" : "") + ": in=" + framesIn + " rendered="
+                 + framesRendered + " dropped=" + framesDropped + " lost=" + framesLost + " decoder=" + decoderName);
+-        MirrorActivity.sessionEnded();
++        // Only close the screen when nothing newer took over: on a codec switch the picture stays up.
++        if (!replaced) MirrorActivity.sessionEnded();
+     }
+ 
+     private void send(String type) {
+diff --git a/android/app/src/main/res/values-ru/strings.xml b/android/app/src/main/res/values-ru/strings.xml
+index d9a63cd..406e4e6 100644
+--- a/android/app/src/main/res/values-ru/strings.xml
++++ b/android/app/src/main/res/values-ru/strings.xml
+@@ -6,4 +6,5 @@
+     <string name="status_address">Адрес: %1$s, порт %2$d</string>
+     <string name="status_connected">Подключены</string>
+     <string name="status_nearby">Рядом в сети</string>
++    <string name="hot_badge">🔥 горячо — снизьте качество</string>
+ </resources>
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 8055b9f..94fb97d 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -7,4 +7,5 @@
+     <string name="status_address">Address: %1$s, port %2$d</string>
+     <string name="status_connected">Connected senders</string>
+     <string name="status_nearby">Senders nearby</string>
++    <string name="hot_badge">🔥 hot — lower the quality</string>
+ </resources>
