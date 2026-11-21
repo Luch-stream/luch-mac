@@ -67,6 +67,10 @@ func parse(_ argv: [String]) -> Args {
             let value = next()
             guard let warmth = Double(value) else { usage() }
             a.options.warmth = min(1, max(0, warmth))
+        case "--audio-bitrate":
+            let value = next()
+            guard let kbps = Int(value), kbps >= 16, kbps <= 512 else { usage() }
+            a.options.audioBitrate = kbps * 1000
         case "--preset", "--quality":
             let value = next()
             guard let preset = QualityPreset.parse(value) else { usage() }

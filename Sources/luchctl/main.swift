@@ -42,6 +42,11 @@ case "mirror":
             index += 2
             continue
         }
+        if args[index] == "--audio-bitrate", index + 1 < args.count {
+            request["audio_bitrate"] = args[index + 1]
+            index += 2
+            continue
+        }
         if (args[index] == "--preset" || args[index] == "--quality"), index + 1 < args.count {
             request["preset"] = args[index + 1]
             index += 2

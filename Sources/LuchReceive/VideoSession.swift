@@ -26,6 +26,8 @@ public final class VideoSession {
 
     private var videoFD: Int32 = -1
     private var audioFD: Int32 = -1
+    /// The audio socket, handed to the audio session so it can read it.
+    var audioSocket: Int32 { audioFD }
     private var running = true
 
     private var format: CMVideoFormatDescription?

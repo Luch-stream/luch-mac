@@ -94,7 +94,7 @@ public enum ReceiveCaps {
             "max": maxSize,
             "modes": accepting ? ["mirror"] : [],
             "decoders": decoders,
-            "hw": ["video": video, "display": display],
+            "hw": ["video": video, "audio": ["audio/opus"], "display": display],
             "bench": bench,
         ]
     }

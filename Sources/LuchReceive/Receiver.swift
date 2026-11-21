@@ -75,6 +75,7 @@ final class ControlServer {
     private var listenFD: Int32 = -1
     private var running = true
     private var session: VideoSession?
+    private var audio: AudioSession?
     private var current: Control?
     private var statsThread: Thread?
     private var registerRef: DNSServiceRef?
@@ -224,6 +225,11 @@ final class ControlServer {
                 control.send(["t": "ready", "video_port": Int(session.videoPort),
                               "audio_port": Int(session.audioPort)])
                 session.start()
+                if session.audioSocket >= 0 {
+                    let audio = AudioSession(fd: session.audioSocket)
+                    audio.start()
+                    self.audio = audio
+                }
                 startStats()
                 owner?.sessionStarted(senderName(from: control))
                 log("viewer: start \(width)x\(height)@\(fps) \(codecText)")
@@ -273,6 +279,8 @@ final class ControlServer {
     }
 
     private func endSession() {
+        audio?.stop()
+        audio = nil
         session?.stop()
         session = nil
         current = nil

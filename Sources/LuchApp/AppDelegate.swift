@@ -50,6 +50,11 @@ final class Preferences {
         set { defaults.set(min(1, max(0, newValue)), forKey: "warmthLevel") }
     }
 
+    var audioBitrate: Int {
+        get { defaults.object(forKey: "audioBitrate") as? Int ?? 128_000 }
+        set { defaults.set(newValue, forKey: "audioBitrate") }
+    }
+
     var preset: String {
         get { defaults.string(forKey: "quality") ?? QualityPreset.auto.rawValue }
         set { defaults.set(newValue, forKey: "quality") }
@@ -89,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Size mode asked for by `luchctl --size-mode` for this session only.
     private var sizeModeOverride: SizeMode?
     private var presetOverride: QualityPreset?
+    private var audioBitrateOverride: Int?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logFile = Bundle.main.bundleURL.deletingLastPathComponent()
@@ -166,6 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let preset = request["preset"] as? String, let value = QualityPreset.parse(preset) {
             presetOverride = value
+        }
+        if let text = request["audio_bitrate"] as? String, let kbps = Int(text) {
+            audioBitrateOverride = kbps * 1000
         }
         if let profile = request["profile"] as? String, let value = VideoProfile(rawValue: profile) {
             self.profileOverride = value
@@ -323,6 +332,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codec.submenu = codecMenu
         menu.addItem(codec)
 
+        let audioBitrate = NSMenuItem(title: "Audio bitrate", action: nil, keyEquivalent: "")
+        let audioMenu = NSMenu()
+        for kbps in [64, 96, 128, 192] {
+            let item = NSMenuItem(title: "\(kbps) kbit/s", action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kbps * 1000
+            item.state = Preferences.shared.audioBitrate == kbps * 1000 ? .on : .off
+            audioMenu.addItem(item)
+        }
+        audioBitrate.submenu = audioMenu
+        menu.addItem(audioBitrate)
+
         let bitrate = NSMenuItem(title: "Bitrate", action: nil, keyEquivalent: "")
         let bitrateMenu = NSMenu()
         for kbps in [10_000, 20_000, 30_000] {
@@ -458,6 +479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         options.codec = codecOverride ?? (CodecChoice(rawValue: Preferences.shared.codec) ?? .auto)
         options.sizeMode = sizeModeOverride ?? (SizeMode(rawValue: Preferences.shared.sizeMode) ?? .fit)
         options.preset = presetOverride ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
+        options.audioBitrate = audioBitrateOverride ?? Preferences.shared.audioBitrate
         options.warmth = Preferences.shared.warmth
         if let frameMs = frameMsOverride { options.audioFrameMs = frameMs }
         options.profile = profileOverride
@@ -547,6 +569,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Preferences.shared.warmth = warmth
         engine?.warmth = warmth
         warmPercent?.stringValue = String(format: "%d%%", Int((warmth * 100).rounded()))
+    }
+
+    @objc private func setAudioBitrate(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? Int else { return }
+        log("app: menu audio bitrate -> \(value)")
+        Preferences.shared.audioBitrate = value
+        restartIfStreaming()
     }
 
     @objc private func setPreset(_ sender: NSMenuItem) {

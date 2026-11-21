@@ -18,7 +18,7 @@ let package = Package(
         .target(name: "LuchMedia", dependencies: ["LuchProto", "COpus"], path: "Sources/LuchMedia"),
         .target(name: "LuchEngine", dependencies: ["LuchProto", "LuchNet", "LuchMedia"], path: "Sources/LuchEngine"),
         .target(name: "LuchLocal", dependencies: ["LuchProto"], path: "Sources/LuchLocal"),
-        .target(name: "LuchReceive", dependencies: ["LuchProto"], path: "Sources/LuchReceive"),
+        .target(name: "LuchReceive", dependencies: ["LuchProto", "COpus"], path: "Sources/LuchReceive"),
         .executableTarget(name: "luch", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine"], path: "Sources/luch"),
         .executableTarget(name: "LuchApp", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine", "LuchLocal"], path: "Sources/LuchApp"),
         .executableTarget(name: "luchctl", dependencies: ["LuchLocal"], path: "Sources/luchctl"),

@@ -82,6 +82,9 @@ public struct MirrorOptions {
     // 20 ms measured best on a real Android receiver: 5 ms and 10 ms crackled because the
     // receiver's AudioTrack buffer (~4 frames) underruns on Wi-Fi jitter.
     public var audioFrameMs = 20
+    /// Opus payload rate. 128 kbit/s stereo is transparent enough for desktop audio; 64 is fine on TV
+    /// speakers and leaves more room on a busy Wi-Fi link.
+    public var audioBitrate = 128_000
     public var codec: CodecChoice = .auto
     public var fit: FitMode = .crop
     public var profile: VideoProfile?
@@ -291,7 +294,7 @@ public final class Engine {
         wireVideo(encoder)
 
         if audioTx != nil {
-            audio = OpusAudio(frameMs: options.audioFrameMs)
+            audio = OpusAudio(bitrate: options.audioBitrate, frameMs: options.audioFrameMs)
             wireAudio()
         }
 
