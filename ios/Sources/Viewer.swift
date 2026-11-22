@@ -1,6 +1,7 @@
 // The receiver's presentation state: discovery, the live session, and the numbers the HUD shows.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import CoreMedia
+import Combine
 import Foundation
 import LuchReceive
 import Observation
@@ -32,8 +33,8 @@ final class Viewer {
     private(set) var fps: Double = 0
     private(set) var latencyMs: Double = 0
     private(set) var lostFrames = 0
-    /// Senders this device can see right now, from mDNS. Empty until the browser answers.
-    var senders: [SenderBrowser.Sender] { browser.senders }
+    /// Senders this device can see right now, from mDNS. Mirrored here so the UI observes it.
+    private(set) var senders: [SenderBrowser.Sender] = []
 
     @ObservationIgnored let relay = VideoRelay()
     /// Weak: SwiftUI owns the view, and a session must not keep a dismantled one alive.
@@ -41,12 +42,23 @@ final class Viewer {
     @ObservationIgnored private var audio: PcmSink?
     @ObservationIgnored private var receiver: Receiver?
     @ObservationIgnored let browser = SenderBrowser()
+    @ObservationIgnored private var senderCancellable: AnyCancellable?
     /// A session exists but the interface may already be back on the waiting screen.
     @ObservationIgnored private var sessionActive = false
 
     // MARK: - lifecycle
 
     func start() {
+        if senderCancellable == nil {
+            senderCancellable = browser.$senders
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] list in
+                    MainActor.assumeIsolated {
+                        self?.senders = list
+                        print("sender-browser: ui list \(list.count)")
+                    }
+                }
+        }
         browser.start()
         guard receiver == nil else { return }
         // Sockets and the Bonjour registration are slow; the first frame must not wait for them.
