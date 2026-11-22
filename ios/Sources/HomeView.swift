@@ -272,8 +272,12 @@ struct HomeView: View {
                             }
                             .padding(.horizontal, 18)
                             .padding(.vertical, 14)
+                            // The whole row is the tap target, not just the label and the icon.
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                         if row.0 != rows.last?.0 {
                             Rectangle()
                                 .fill(LuchStyle.separator)
