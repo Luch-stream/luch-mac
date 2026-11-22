@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 import LuchProto
 
-public final class ControlChannel {
+public final class ControlChannel: ControlLink, @unchecked Sendable {
     public var onEvent: (([String: Any]) -> Void)?
     public var onClosed: ((String) -> Void)?
     public private(set) var rttMs: Double = 0

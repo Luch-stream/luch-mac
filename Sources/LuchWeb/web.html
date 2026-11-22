@@ -1,0 +1,205 @@
+<!doctype html>
+<!-- Luch web receiver: one self-contained page. Served by luchd on WEB_PORT; on start it opens a
+     websocket to the same origin, answers the usual receiver handshake and decodes the stream
+     with WebCodecs (H.264 annexb -> canvas, Opus -> AudioContext). -->
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luch</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,sans-serif}
+canvas{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;gap:3vmin;align-items:center;justify-content:center;color:#e8e8e8;text-align:center;padding:0 5vw}
+#msg h1{font-size:7vmin;margin:0}#msg p{font-size:3vmin;opacity:.7;margin:0;word-break:break-word}
+#go{font-size:4.5vmin;padding:2vmin 7vmin;border-radius:1.2vmin;border:1px solid #666;background:#1c1c1c;color:#fff;cursor:pointer}
+#go:focus{outline:0.6vmin solid #6c6;outline-offset:0.6vmin}
+#stats{position:fixed;right:1em;bottom:1em;color:#9f9;font:13px/1.4 ui-monospace,monospace;text-shadow:0 1px 2px #000;white-space:pre;display:none}
+</style>
+<canvas></canvas>
+<div id="stats"></div>
+<div id="msg"><h1>Luch</h1><p id="hint"></p><button id="go" autofocus></button></div>
+<script>
+'use strict';
+const RU = navigator.language.startsWith('ru');
+const T = RU ? {go:'Смотреть', hint:'Нажмите, чтобы принимать трансляцию с компьютера', wait:'Подключение…',
+                lost:'Связь потеряна', err:'Ошибка', stop:'Остановлено', noweb:'Браузер без WebCodecs — обновите его',
+                insecure:'Браузер блокирует WebCodecs по HTTP. Откройте Luch по HTTPS с доверенным сертификатом. Адрес 127.0.0.1 работает только на самом компьютере.'}
+             : {go:'Watch', hint:'Press to receive the stream from your computer', wait:'Connecting…',
+                lost:'Connection lost', err:'Error', stop:'Stopped', noweb:'No WebCodecs in this browser — update it',
+                insecure:'The browser blocks WebCodecs over HTTP. Open Luch over HTTPS with a trusted certificate. The address 127.0.0.1 only works on the sender itself.'};
+const $ = id => document.getElementById(id);
+// Luch datagram header, 24 bytes big-endian: kind, flags, idx, shards, parity, seq, pts_us, len, host_lat.
+const head = b => ({kind: b[0], flags: b[1], pts: (b[12]<<24|b[13]<<16|b[14]<<8|b[15])>>>0, len: b[16]<<24|b[17]<<16|b[18]<<8|b[19]});
+let ws, vdec, adec, actx, at = 0, wrap = 0, lastPts = -1, stopping = false, stat = null;
+
+$('go').textContent = T.go;
+$('hint').textContent = T.hint;
+if (!window.isSecureContext || !window.VideoDecoder || !window.AudioDecoder) {
+  $('go').style.display = 'none';
+  $('hint').textContent = window.isSecureContext ? T.noweb : T.insecure;
+}
+// The autofocus attribute is not enough on a TV: the button gets shown/hidden, and fullscreen
+// moves focus. Keep it focused while it is the only thing on screen, and take Enter anyway.
+const focusGo = () => { if ($('go').offsetParent) $('go').focus(); };
+focusGo();
+addEventListener('focus', focusGo);
+document.addEventListener('keydown', e => {
+  if ($('go').offsetParent === null) return;
+  if (document.activeElement === $('go')) return; // native Enter/Space already clicks it
+  focusGo();
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('go').click(); }
+});
+
+function msg(title, sub, btn) {
+  $('msg').style.display = 'flex';
+  $('msg').querySelector('h1').textContent = title;
+  $('hint').textContent = sub ?? '';
+  $('go').style.display = btn ? '' : 'none';
+  if (btn) focusGo();
+}
+const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+
+let streaming = false, screenLock = null, screenLockPending = false;
+async function keepScreenOn() {
+  if (!streaming || document.visibilityState !== 'visible' || !navigator.wakeLock ||
+      screenLockPending || (screenLock && !screenLock.released)) return;
+  screenLockPending = true;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    // Stop/disconnect can arrive while the browser is still granting the request.
+    if (!streaming || document.visibilityState !== 'visible') {
+      await lock.release();
+      return;
+    }
+    screenLock = lock;
+    lock.addEventListener('release', () => { if (screenLock === lock) screenLock = null; });
+  } catch (e) {
+    console.warn('Luch: screen wake lock unavailable', e);
+  } finally {
+    screenLockPending = false;
+  }
+}
+function setStreaming(active) {
+  streaming = active;
+  if (active) {
+    keepScreenOn();
+  } else {
+    const lock = screenLock;
+    screenLock = null;
+    if (lock) lock.release().catch(() => {});
+  }
+}
+document.addEventListener('visibilitychange', keepScreenOn);
+addEventListener('pagehide', () => setStreaming(false));
+
+function start() {
+  setStreaming(false);
+  msg(T.wait, '', false);
+  document.documentElement.requestFullscreen?.().catch(() => {});
+  actx = actx || new AudioContext(); actx.resume();
+  const wsScheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${wsScheme}//${location.host}/ws${location.search}`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = reset;
+  ws.onmessage = e => typeof e.data === 'string' ? ctrl(JSON.parse(e.data)) : media(new Uint8Array(e.data));
+  ws.onclose = () => { setStreaming(false); $('stats').style.display = 'none'; if (!stopping) msg(T.lost, '', true); };
+}
+
+function reset() {
+  vdec = null; adec = null; sps = null; wrap = 0; lastPts = -1; stat = null;
+  at = actx ? actx.currentTime : 0;
+  $('msg').style.display = 'none';
+  // The daemon waits 5 s for this; without it the socket closes -> "connection lost".
+  const ua = /\b(Chrome|Firefox|Safari)\/[\d.]+/.exec(navigator.userAgent);
+  send({t: 'hello', v: 0, name: 'Web', model: ua ? ua[0] : navigator.userAgent.slice(0, 30),
+        display: {width: Math.round(screen.width * devicePixelRatio), height: Math.round(screen.height * devicePixelRatio)},
+        mode: new URLSearchParams(location.search).get('mode') || 'fast'});
+}
+
+function ctrl(m) {
+  switch (m.t) {
+    case 'start':
+      setStreaming(true);
+      send({t: 'ready', video_port: 0, audio_port: 0});
+      send({t: 'keyframe'});                      // begin with a clean IDR
+      break;
+    case 'ping': send({t: 'pong', n: m.n}); break;
+    case 'sender_stats': stat = m; break;
+    case 'stop': case 'bye': setStreaming(false); stopping = true; msg(T.stop, '', false); ws.close(); break;
+    case 'error': setStreaming(false); msg(T.err, m.msg || m.code || '', true); break;
+  }
+}
+
+function media(b) {
+  const h = head(b), d = b.subarray(24, 24 + h.len);
+  if (h.pts < lastPts - 2147483648) wrap += 4294967296;  // u32 wrap at ~71 min
+  lastPts = h.pts;
+  const ts = wrap + h.pts;
+  if (h.kind === 1) video(h, d, ts); else if (h.kind === 2) audio(h, d, ts);
+}
+
+// ---- video: H.264 annexb, SPS/PPS in-band in every IDR ----
+let sps = null;
+function codecOf(d) {                             // find the first SPS NAL, read profile/constraint/level
+  for (let i = 0; i < d.length - 7; i++) {
+    if (d[i] | d[i+1] | (d[i+2] !== 1 ? 1 : 0)) continue;
+    if ((d[i+3] & 31) === 7) return d.subarray(i+4, i+7);
+  }
+  return null;
+}
+function bail(e) { console.error(e); vdec = null; sps = null; send({t: 'keyframe'}); }
+function video(h, d, ts) {
+  if (h.flags & 1 && !sps) sps = codecOf(d);
+  if (!vdec && sps) {
+    vdec = new VideoDecoder({output: draw, error: bail});
+    vdec.configure({codec: 'avc1.' + [...sps].map(x => x.toString(16).padStart(2, '0')).join(''),
+                    optimizeForLatency: true});
+  }
+  if (vdec && vdec.state === 'configured')
+    try { vdec.decode(new EncodedVideoChunk({type: h.flags & 1 ? 'key' : 'delta', timestamp: ts, data: d})); }
+    catch (e) { bail(e); }
+}
+function draw(f) {
+  const c = document.querySelector('canvas');
+  if (c.width !== f.displayWidth) { c.width = f.displayWidth; c.height = f.displayHeight; }
+  c.getContext('2d').drawImage(f, 0, 0, c.width, c.height);
+  f.close();
+}
+
+// ---- audio: Opus, first frame is the RFC 7845 OpusHead ----
+function audio(h, d, ts) {
+  if (h.flags & 2) {
+    if (!adec || adec.state !== 'configured') {
+      adec = new AudioDecoder({output: play, error: e => { console.error(e); adec = null; }});
+      adec.configure({codec: 'opus', sampleRate: 48000, numberOfChannels: 2, description: d});
+    }
+    return;
+  }
+  if (adec && adec.state === 'configured')
+    adec.decode(new EncodedAudioChunk({type: 'key', timestamp: ts, data: d}));
+}
+function play(ad) {
+  let buf;
+  try {
+    buf = actx.createBuffer(ad.numberOfChannels, ad.numberOfFrames, ad.sampleRate);
+    for (let ch = 0; ch < ad.numberOfChannels; ch++)
+      ad.copyTo(buf.getChannelData(ch), {planeIndex: ch, format: 'f32-planar'});
+  } finally {
+    ad.close();
+  }
+  const src = actx.createBufferSource();
+  src.buffer = buf; src.connect(actx.destination);
+  if (at < actx.currentTime) at = actx.currentTime + 0.02;  // dropped behind: skip instead of drift
+  src.start(at); at += buf.duration;
+}
+
+setInterval(() => {                                // tiny latency overlay, sender-side numbers
+  if (!stat || $('msg').style.display !== 'none') return;
+  $('stats').style.display = '';
+  $('stats').textContent = `${stat.fps} fps · ${stat.mbps} Mbit/s · ≈${Math.round((stat.host_ms || 0) + (stat.rtt_ms || 0) / 2)} ms`;
+}, 1000);
+
+$('go').onclick = () => { stopping = false; start(); };
+document.body.ondblclick = () =>
+  document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
+</script>

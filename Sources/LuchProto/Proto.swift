@@ -16,6 +16,8 @@ public struct PacketFlags: OptionSet, Sendable {
 }
 
 public enum Proto {
+    /// The browser receiver: page and websocket on one HTTPS port.
+    public static let webPort: UInt16 = 47801
     public static let version: UInt32 = 0
     public static let receiverType = "_luch._tcp"
     public static let senderType = "_luchsrc._tcp"

@@ -241,9 +241,9 @@ public final class Engine: @unchecked Sendable {
     public var onStopped: ((String) -> Void)?
     public private(set) var receiver: Receiver?
 
-    private var control: ControlChannel?
-    private var videoTx: UdpSender?
-    private var audioTx: UdpSender?
+    private var control: ControlLink?
+    private var videoTx: MediaSink?
+    private var audioTx: MediaSink?
     private var encoder: VideoEncoder?
     private var audio: OpusAudio?
     private var capture: ScreenCapture?
@@ -510,6 +510,77 @@ public final class Engine: @unchecked Sendable {
             control?.send(["t": "stop"])
             throw failure
         }
+    }
+
+    /// The browser receiver: the page has already said hello and been answered by the app, and the
+    /// media sinks write into the same WebSocket. No UDP sockets, no ports to agree on.
+    public func startWeb(link: ControlLink, welcome: [String: Any], video: MediaSink, audio: MediaSink?)
+        throws
+    {
+        self.receiver = Receiver(
+            id: "web", name: "Web", model: "browser", address: "127.0.0.1", interfaceName: "lo0",
+            interfaceIndex: 0,
+            port: Proto.webPort, service: "web")
+        warmth = options.warmth
+        control = link
+        link.onEvent = { [weak self] msg in self?.handle(msg) }
+        guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
+        self.caps = caps
+        log(caps.describe())
+        let plan = CodecPlanner.plan(caps: caps, receiverID: "web", options: options)
+        self.plan = plan
+        log(
+            "plan: \(plan.codec.label) \(plan.width)x\(plan.height)@\(plan.fps) audio=\(plan.audio) — \(plan.reason)"
+        )
+
+        var start: [String: Any] = [
+            "t": "start", "mode": "mirror",
+            "video": [
+                "codec": plan.codec.rawValue, "width": plan.width,
+                "height": plan.height, "fps": plan.fps,
+            ],
+        ]
+        if plan.audio {
+            start["audio"] = [
+                "codec": "audio/opus", "rate": 48_000, "channels": 2,
+                "frame_ms": options.audioFrameMs,
+            ]
+        }
+        link.send(start)
+        guard link.waitFor("ready", timeout: 5) != nil else { throw EngineError.noReady }
+
+        videoTx = video
+        audioTx = plan.audio ? audio : nil
+
+        let kbps =
+            options.bitrate > 0
+            ? options.bitrate
+            : AutoBitrate.videoKbps(width: plan.width, height: plan.height, fps: plan.fps, codec: plan.codec)
+        if options.bitrate == 0 { log("video: auto bitrate \(kbps) kbit/s") }
+        guard
+            let encoder = VideoEncoder(
+                codec: plan.codec, width: plan.width, height: plan.height,
+                fps: plan.fps, kbps: kbps, profile: options.profile)
+        else {
+            throw EngineError.encoder
+        }
+        self.encoder = encoder
+        wireVideo(encoder)
+
+        if audioTx != nil {
+            let audioBps =
+                options.audioBitrate > 0
+                ? options.audioBitrate
+                : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
+            self.audio = OpusAudio(bitrate: audioBps, frameMs: options.audioFrameMs, fec: options.audioFEC)
+            wireAudio()
+        }
+
+        running = true
+        streaming = true
+        try startMedia()
+        startTimers()
+        log("streaming to the browser; Ctrl-C to stop")
     }
 
     // MARK: - events

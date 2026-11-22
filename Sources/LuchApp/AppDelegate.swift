@@ -7,6 +7,7 @@ import LuchLocal
 import LuchMedia
 import LuchNet
 import LuchProto
+import LuchWeb
 import ScreenCaptureKit
 import ServiceManagement
 
@@ -122,6 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var server: LocalServer?
     private var currentReceiverID: String?
     private var currentReceiver: Receiver?
+    private var web: WebServer?
+    /// Browsers that said hello: they are receivers like any other, with their socket attached.
+    private var webClients: [String: WebClient] = [:]
+    /// The browser receiver's address, shown in the menu once the server is up.
+    private var webURL: URL?
     private weak var warmPercent: NSTextField?
     /// Set from `luchctl mirror --frame-ms N`, for A/B testing the audio buffer without a rebuild.
     private var frameMsOverride: Int?
@@ -145,6 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             Bundle.main.bundleURL.deletingLastPathComponent()
             .appendingPathComponent("luch-app.log").path
         log("app: launched, bundle \(Bundle.main.bundleURL.lastPathComponent)")
+
+        startWebServer()
 
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -175,6 +183,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     // MARK: - local API (luchctl)
+
+    private func startWebServer() {
+        let support =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Luch") ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let server = WebServer(identityDirectory: support)
+        server.onClient = { [weak self] socket in
+            socket.onText = { [weak self] message in
+                guard let self, (message["t"] as? String) == "hello" else { return }
+                let client = WebClient(socket: socket, hello: message)
+                socket.send(client.welcome)
+                Task { @MainActor in
+                    self.webClients[client.id] = client
+                    self.refreshReceivers()
+                    log("web: \(client.name) connected")
+                }
+            }
+        }
+        do {
+            try server.start(port: Proto.webPort, ip: webAddress())
+            web = server
+            if let ip = webAddress() {
+                webURL = URL(string: "https://\(ip):\(Proto.webPort)/")
+            }
+        } catch {
+            log("web: not started: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func openWebClient() {
+        guard let url = webURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func copyWebAddress() {
+        guard let url = webURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
 
     private func startLocalServer() {
         let server = LocalServer()
@@ -281,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     // MARK: - menu
 
     private func refreshReceivers() {
-        receivers = discovery.all()
+        receivers = discovery.all() + webClients.values.map(\.receiver)
         rebuildMenu()
     }
 
@@ -522,6 +569,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         heat.submenu = heatMenu
         menu.addItem(heat)
 
+        // Web ▸ — the browser receiver, for phones and laptops that have no app.
+        if let url = webURL {
+            let webGroup = NSMenuItem(title: "Web", action: nil, keyEquivalent: "")
+            let webMenu = NSMenu()
+            let address = NSMenuItem(title: url.absoluteString, action: nil, keyEquivalent: "")
+            address.isEnabled = false
+            webMenu.addItem(address)
+            let openItem = NSMenuItem(
+                title: "Open in browser", action: #selector(openWebClient), keyEquivalent: "")
+            openItem.target = self
+            webMenu.addItem(openItem)
+            let copyItem = NSMenuItem(
+                title: "Copy address", action: #selector(copyWebAddress), keyEquivalent: "")
+            copyItem.target = self
+            webMenu.addItem(copyItem)
+            webGroup.submenu = webMenu
+            menu.addItem(webGroup)
+        }
+
         menu.addItem(.separator())
 
         let launch = NSMenuItem(
@@ -657,6 +723,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
                 _ = ready.wait(timeout: .now() + 5)
             }
+            startWebServer()
+
             NSApp.setActivationPolicy(.accessory)
             if !CGPreflightScreenCaptureAccess() {
                 state = "Screen Recording permission required"
@@ -704,9 +772,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         state = "Connecting to \(receiver.name)…"
         rebuildMenu()
 
+        let browser = webClients[receiver.id]
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                try engine.start(receiver: receiver)
+                if let browser {
+                    // The page is already connected: control and media ride its socket.
+                    try engine.startWeb(
+                        link: WebControl(client: browser), welcome: browser.welcome,
+                        video: WebMediaSink(client: browser, kind: .video),
+                        audio: WebMediaSink(client: browser, kind: .audio))
+                } else {
+                    try engine.start(receiver: receiver)
+                }
                 let codec = engine.plan?.codec.label ?? ""
                 let batteryNote = engine.deviceOnBattery ? " · 🔋 on battery" : ""
                 Task { @MainActor in

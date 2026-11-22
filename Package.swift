@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "LuchEngine", targets: ["LuchEngine"]),
         .library(name: "LuchReceive", targets: ["LuchReceive"]),
         .library(name: "LuchAudio", targets: ["LuchAudio"]),
+        .library(name: "LuchWeb", targets: ["LuchWeb"]),
     ],
     targets: [
         .systemLibrary(name: "COpus", path: "Sources/COpus", pkgConfig: "opus", providers: [.brew(["opus"])]),
@@ -29,13 +30,14 @@ let package = Package(
         .target(name: "LuchReceive", dependencies: ["LuchProto"], path: "Sources/LuchReceive"),
         .target(
             name: "LuchAudio", dependencies: ["LuchProto", "LuchReceive", "COpus"], path: "Sources/LuchAudio"),
+        .target(name: "LuchWeb", dependencies: ["LuchProto", "LuchNet"], path: "Sources/LuchWeb"),
         .executableTarget(
             name: "luch", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine"],
             path: "Sources/luch",
             swiftSettings: uiMode),
         .executableTarget(
             name: "LuchApp",
-            dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine", "LuchLocal"],
+            dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine", "LuchLocal", "LuchWeb"],
             path: "Sources/LuchApp",
             swiftSettings: uiMode),
         .executableTarget(
@@ -45,7 +47,7 @@ let package = Package(
             path: "Sources/LuchViewer",
             swiftSettings: uiMode),
         .testTarget(
-            name: "LuchTests", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine"],
+            name: "LuchTests", dependencies: ["LuchProto", "LuchNet", "LuchMedia", "LuchEngine", "LuchWeb"],
             path: "Tests/LuchTests"),
     ]
 )

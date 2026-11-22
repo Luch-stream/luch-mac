@@ -5,7 +5,7 @@ import Darwin
 import Foundation
 import LuchProto
 
-public final class UdpSender {
+public final class UdpSender: MediaSink, @unchecked Sendable {
     public let kind: MediaKind
     private let fd: Int32
     private let lock = NSLock()
@@ -15,11 +15,7 @@ public final class UdpSender {
     private var latencySum: UInt64 = 0
     private var warned = false
 
-    public struct Snapshot {
-        public var frames: UInt64
-        public var bytes: UInt64
-        public var latencySum: UInt64
-    }
+    public typealias Snapshot = MediaStats
 
     private init(kind: MediaKind, fd: Int32) {
         self.kind = kind
@@ -125,6 +121,6 @@ public final class UdpSender {
     public func snapshot() -> Snapshot {
         lock.lock()
         defer { lock.unlock() }
-        return Snapshot(frames: framesSent, bytes: bytesSent, latencySum: latencySum)
+        return MediaStats(frames: framesSent, bytes: bytesSent, latencySum: latencySum)
     }
 }
