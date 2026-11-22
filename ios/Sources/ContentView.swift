@@ -21,11 +21,11 @@ struct ContentView: View {
 
             // Two pages the user swipes between; the dots below show where they are, and the
             // page content (card, hints, buttons) is rebuilt as the page changes.
-            TabView(selection: pageIndex) {
-                receiving.tag(0)
-                SendView(pageIndex: pageIndex, onSettings: presentSettings).tag(1)
+            if viewer.phase == .waiting {
+                HomeView(viewer: viewer, pageIndex: pageIndex, onSettings: presentSettings)
+            } else {
+                receiving
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background {
             GeometryReader { proxy in
