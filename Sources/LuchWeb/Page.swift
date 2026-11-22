@@ -430,7 +430,7 @@ enum WebPage {
         "// ---- the channel -----------------------------------------------------------------------------",
         "// Over plain HTTP the page seals every message itself: the code shown here is stretched into an",
         "// AES-GCM key that the sender derives from the same code once the person there agrees.",
-        "var encMode = false, key = null, sendCtr = 0, recvCtr = 0, salt = null, pairCode = '';",
+        "var encMode = false, key = null, sendCtr = 0, recvCtr = -1, salt = null, pairCode = '';",
         "var inbox = Promise.resolve();",
         "",
         "function enqueue(task) {",

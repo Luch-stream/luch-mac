@@ -207,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                     if !self.approvedRecently(code) {
                         // Ask in the menu, not in a modal dialog: a dialog would freeze the app while
                         // the browser waits, and the menu stays usable either way.
-                        let request = PendingPairing(socket: socket, name: name, code: code, salt: salt)
+                        let request = PendingPairing(socket: socket, name: name, code: code, salt: salt, hello: message)
                         Task { @MainActor in
                             self.pendingPairings[code] = request
                             self.rebuildMenu()
@@ -248,11 +248,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// prompt: the person already said yes to this code.
     private var approvedCode: (code: String, at: Date)?
     /// Browsers waiting for the person here to allow them; the menu lists them, nothing blocks.
-    private struct PendingPairing {
+    private struct PendingPairing: @unchecked Sendable {
         let socket: WebSocketConnection
         let name: String
         let code: String
         let salt: Data
+        /// The hello that started it: the answer comes after the user decides, not before.
+        let hello: [String: Any]
     }
     private var pendingPairings: [String: PendingPairing] = [:]
 
@@ -276,12 +278,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         approvedCode = (code, Date())
         let socket = request.socket
         let secure = secureChannel(for: socket, code: code, salt: request.salt)
-        socket.onText = { [weak self] message in
-            guard let self, (message["t"] as? String) == "hello" else { return }
-            let client = WebClient(socket: secure, hello: message)
-            socket.send(client.welcome)
-            self.register(client: client, socket: socket)
-        }
+        let client = WebClient(socket: secure, hello: request.hello)
+        secure.send(client.welcome)
+        register(client: client, socket: socket)
         rebuildMenu()
     }
 
@@ -391,12 +390,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             if (request["cmd"] as? String) == "allow" {
                 approvedCode = (code, Date())
                 let secure = secureChannel(for: pending.socket, code: code, salt: pending.salt)
-                pending.socket.onText = { [weak self] message in
-                    guard let self, (message["t"] as? String) == "hello" else { return }
-                    let client = WebClient(socket: secure, hello: message)
-                    pending.socket.send(client.welcome)
-                    self.register(client: client, socket: pending.socket)
-                }
+                let client = WebClient(socket: secure, hello: pending.hello)
+                secure.send(client.welcome)
+                register(client: client, socket: pending.socket)
             } else {
                 pending.socket.send(["t": "deny"])
                 pending.socket.close()
@@ -499,6 +495,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             item.submenu = submenu
             if index == 0 { item.image = NSImage(systemSymbolName: "tv", accessibilityDescription: nil) }
             menu.addItem(item)
+        }
+
+        // Browsers waiting for a yes: the TV shows the code, this asks about it.
+        if !pendingPairings.isEmpty {
+            menu.addItem(.separator())
+            for (code, request) in pendingPairings.sorted(by: { $0.key < $1.key }) {
+                let allow = NSMenuItem(
+                    title: "Allow \(request.name) (code \(code))", action: #selector(allowPairing(_:)),
+                    keyEquivalent: "")
+                allow.target = self
+                allow.representedObject = code
+                menu.addItem(allow)
+                let deny = NSMenuItem(
+                    title: "Deny \(request.name)", action: #selector(denyPairing(_:)), keyEquivalent: "")
+                deny.target = self
+                deny.representedObject = code
+                menu.addItem(deny)
+            }
         }
 
         menu.addItem(.separator())

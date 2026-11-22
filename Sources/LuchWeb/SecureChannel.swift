@@ -33,7 +33,7 @@ public final class SecureChannel: @unchecked Sendable {
     private let key: SymmetricKey
     private let lock = NSLock()
     private var sendCounter: UInt64 = 0
-    private var lastReceived: UInt64 = 0
+    private var lastReceived: UInt64?
     private let prefix: [UInt8]
 
     /// The pairing code is stretched with PBKDF2 the same way the page does it.
@@ -75,7 +75,7 @@ public final class SecureChannel: @unchecked Sendable {
         var value: UInt64 = 0
         for byte in nonce.suffix(8) { value = value << 8 | UInt64(byte) }
         lock.lock()
-        let replay = value <= lastReceived
+        let replay = lastReceived.map { value <= $0 } ?? false
         if !replay { lastReceived = value }
         lock.unlock()
         if replay { throw SecureChannelError.replay }
