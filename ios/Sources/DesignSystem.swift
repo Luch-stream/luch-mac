@@ -221,7 +221,8 @@ struct PageDots: View {
                     .animation(.easeInOut(duration: 0.2), value: index)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Страница \(index + 1) из \(count)")
+        // An indicator, not a control: it must never eat a swipe or a tap meant for the card.
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

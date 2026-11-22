@@ -168,10 +168,13 @@ struct HomeView: View {
                 .buttonStyle(.plain)
                 .frame(height: 52)
                 .background(alignment: .center) {
+                    // A real size for layout, zero visual footprint: the system button needs a
+                    // laid-out view, not a 1×1 one, before it can be pressed for us.
                     BroadcastPicker(trigger: pickerTrigger)
-                        .frame(width: 1, height: 1)
+                        .frame(width: 44, height: 44)
                         .opacity(0.001)
                         .allowsHitTesting(false)
+                        .clipped()
                 }
             } else {
                 Color.clear.frame(height: 52)
