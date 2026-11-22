@@ -14,20 +14,15 @@ struct ContentView: View {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
-            switch mode {
-            case .send:
-                SendView(onSettings: presentSettings)
-            case .receive:
+            // The system tab bar: a bottom bar on a phone, the side region on a closed Duo.
+            TabView(selection: $mode) {
                 receiving
+                    .tag(Mode.receive)
+                    .tabItem { Label("Принимать", systemImage: "arrow.down.left.and.arrow.up.right") }
+                SendView(onSettings: presentSettings)
+                    .tag(Mode.send)
+                    .tabItem { Label("Отправлять", systemImage: "arrow.up.right.and.arrow.down.left") }
             }
-        }
-        .overlay(alignment: .bottom) {
-            Picker("Режим", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 40)
-            .padding(.bottom, 10)
         }
         .background {
             GeometryReader { proxy in
