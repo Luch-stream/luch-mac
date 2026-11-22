@@ -8,12 +8,12 @@ public final class WebClient: @unchecked Sendable {
     public let id: String
     public let name: String
     public let model: String
-    public let socket: WebSocketConnection
+    public let socket: MessageSocket
     /// What the page reported about its screen: the sender plans the frame size from it.
     public let display: (width: Int, height: Int)
     public let welcome: [String: Any]
 
-    public init(socket: WebSocketConnection, hello: [String: Any]) {
+    public init(socket: MessageSocket, hello: [String: Any]) {
         self.socket = socket
         let ua = hello["name"] as? String ?? "Web"
         let model = hello["model"] as? String ?? "browser"

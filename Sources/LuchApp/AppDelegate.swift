@@ -179,7 +179,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        engine?.stop(reason: "quit")
+        // The receiver has to learn the session is over, not just see the socket vanish.
+        if let engine {
+            engine.stop(reason: "quit")
+        }
+        for client in webClients.values {
+            client.socket.send(["t": "bye"])
+            client.socket.close()
+        }
+        web?.stop()
+        Thread.sleep(forTimeInterval: 0.4)  // let the control channel and sockets flush
     }
 
     // MARK: - local API (luchctl)
@@ -191,9 +200,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         let server = WebServer(identityDirectory: support)
         server.onClient = { [weak self] socket in
             socket.onText = { [weak self] message in
+                log("web: message \(message["t"] as? String ?? "?") enc=\(message["enc"] as? String ?? "-")")
                 guard let self, (message["t"] as? String) == "hello" else { return }
-                let client = WebClient(socket: socket, hello: message)
+                // The plain-HTTP page cannot use TLS, so it asks for a pairing code instead: both
+                // ends stretch it into an AES-GCM key and seal everything that follows.
+                var channel: MessageSocket = socket
+                if (message["enc"] as? String) == "aes-gcm" {
+                    guard let saltText = message["salt"] as? String, let salt = Data(base64Encoded: saltText),
+                        let code = message["code"] as? String
+                    else {
+                        socket.close()
+                        return
+                    }
+                    let name = message["model"] as? String ?? "browser"
+                    if !self.approvedRecently(code) {
+                        // Ask in the menu, not in a modal dialog: a dialog would freeze the app while
+                        // the browser waits, and the menu stays usable either way.
+                        let request = PendingPairing(socket: socket, name: name, code: code, salt: salt, hello: message)
+                        Task { @MainActor in
+                            self.pendingPairings[code] = request
+                            self.rebuildMenu()
+                            log("web: browser \(name) asks to pair, code \(code)")
+                        }
+                        return
+                    }
+                    channel = self.secureChannel(for: socket, code: code, salt: salt)
+                }
+                let client = WebClient(socket: channel, hello: message)
                 socket.send(client.welcome)
+                socket.onClosed = { [weak self] in
+                    Task { @MainActor in
+                        self?.webClients[client.id] = nil
+                        self?.refreshReceivers()
+                        log("web: \(client.name) disconnected")
+                    }
+                }
                 Task { @MainActor in
                     self.webClients[client.id] = client
                     self.refreshReceivers()
@@ -210,6 +251,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         } catch {
             log("web: not started: \(error.localizedDescription)")
         }
+    }
+
+    /// A code approved a moment ago lets the phone that scanned the same QR in without a second
+    /// prompt: the person already said yes to this code.
+    private var approvedCode: (code: String, at: Date)?
+    /// Browsers waiting for the person here to allow them; the menu lists them, nothing blocks.
+    private struct PendingPairing: @unchecked Sendable {
+        let socket: WebSocketConnection
+        let name: String
+        let code: String
+        let salt: Data
+        /// The hello that started it: the answer comes after the user decides, not before.
+        let hello: [String: Any]
+    }
+    private var pendingPairings: [String: PendingPairing] = [:]
+
+    private func approvedRecently(_ code: String) -> Bool {
+        guard let approved = approvedCode, approved.code == code else { return false }
+        return Date().timeIntervalSince(approved.at) < 300
+    }
+
+    private func secureChannel(for socket: WebSocketConnection, code: String, salt: Data) -> MessageSocket {
+        let secure = EncryptedSocket(socket: socket)
+        secure.activate(SecureChannel(code: code, salt: salt))
+        socket.send(["t": "ok"])  // the page derives the key from the same code now
+        return secure
+    }
+
+    @objc private func allowPairing(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String, let request = pendingPairings[code] else {
+            return
+        }
+        pendingPairings[code] = nil
+        approvedCode = (code, Date())
+        let socket = request.socket
+        let secure = secureChannel(for: socket, code: code, salt: request.salt)
+        let client = WebClient(socket: secure, hello: request.hello)
+        secure.send(client.welcome)
+        register(client: client, socket: socket)
+        rebuildMenu()
+    }
+
+    @objc private func denyPairing(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String, let request = pendingPairings[code] else {
+            return
+        }
+        pendingPairings[code] = nil
+        request.socket.send(["t": "deny"])
+        request.socket.close()
+        rebuildMenu()
+    }
+
+    private func register(client: WebClient, socket: WebSocketConnection) {
+        socket.onClosed = { [weak self] in
+            Task { @MainActor in
+                self?.webClients[client.id] = nil
+                self?.refreshReceivers()
+                log("web: \(client.name) disconnected")
+            }
+        }
+        webClients[client.id] = client
+        refreshReceivers()
+        log("web: \(client.name) connected")
+    }
+
+    /// One dialog per browser: the TV shows the code, the person here just agrees.
+    private func confirmPairing(name: String, code: String) -> Bool {
+        if let approved = approvedCode, approved.code == code, Date().timeIntervalSince(approved.at) < 300 {
+            return true
+        }
+        var accepted = false
+        let work = {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Подключиться к \(name)?"
+            alert.informativeText = "Код на экране: \(code). Если он совпадает, разрешите показ."
+            alert.addButton(withTitle: "Разрешить")
+            alert.addButton(withTitle: "Отклонить")
+            accepted = alert.runModal() == .alertFirstButtonReturn
+            NSApp.setActivationPolicy(.accessory)
+        }
+        if Thread.isMainThread { work() } else { DispatchQueue.main.sync(execute: work) }
+        if accepted { approvedCode = (code, Date()) }
+        return accepted
     }
 
     @objc private func openWebClient() {
@@ -265,6 +391,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             ]
         case "state":
             return ["state": state, "streaming": engine != nil, "stats": statsDictionary()]
+        case "allow", "deny":
+            // Pairing from the command line, for scripts and for a headless check.
+            let code = request["code"] as? String ?? ""
+            guard let pending = pendingPairings[code] else { return ["error": "no such code"] }
+            pendingPairings[code] = nil
+            if (request["cmd"] as? String) == "allow" {
+                approvedCode = (code, Date())
+                let secure = secureChannel(for: pending.socket, code: code, salt: pending.salt)
+                let client = WebClient(socket: secure, hello: pending.hello)
+                secure.send(client.welcome)
+                register(client: client, socket: pending.socket)
+            } else {
+                pending.socket.send(["t": "deny"])
+                pending.socket.close()
+            }
+            rebuildMenu()
+            return ["ok": true]
         case "stats":
             return ["stats": statsDictionary()]
         case "mirror":
@@ -361,6 +504,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             item.submenu = submenu
             if index == 0 { item.image = NSImage(systemSymbolName: "tv", accessibilityDescription: nil) }
             menu.addItem(item)
+        }
+
+        // Browsers waiting for a yes: the TV shows the code, this asks about it.
+        if !pendingPairings.isEmpty {
+            menu.addItem(.separator())
+            for (code, request) in pendingPairings.sorted(by: { $0.key < $1.key }) {
+                let allow = NSMenuItem(
+                    title: "Allow \(request.name) (code \(code))", action: #selector(allowPairing(_:)),
+                    keyEquivalent: "")
+                allow.target = self
+                allow.representedObject = code
+                menu.addItem(allow)
+                let deny = NSMenuItem(
+                    title: "Deny \(request.name)", action: #selector(denyPairing(_:)), keyEquivalent: "")
+                deny.target = self
+                deny.representedObject = code
+                menu.addItem(deny)
+            }
         }
 
         menu.addItem(.separator())
@@ -614,6 +775,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     private func tick() {
+        // Receivers vanish without a goodbye when a device sleeps or leaves the network.
+        if discovery.sweep(maxAge: 90) > 0 { pendingMenuRefresh = true }
         guard let stats = engine?.lastStats else {
             if engine == nil && statsLine != "Not streaming" {
                 statsLine = "Not streaming"
@@ -778,6 +941,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         state = "Connecting to \(receiver.name)…"
         rebuildMenu()
 
+        // A browser is not a TCP receiver: if its socket is gone, say so instead of dialling the page.
+        if receiver.id.hasPrefix("web-"), webClients[receiver.id] == nil {
+            state = "Browser is gone — reload the page"
+            rebuildMenu()
+            return
+        }
         let browser = webClients[receiver.id]
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {

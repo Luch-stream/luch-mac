@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import CommonCrypto
 import Foundation
+import LuchProto
 import Network
 
-public final class WebSocketConnection {
+public final class WebSocketConnection: MessageSocket, @unchecked Sendable {
     public var onText: (([String: Any]) -> Void)?
     public var onClosed: (() -> Void)?
 
@@ -57,6 +58,7 @@ public final class WebSocketConnection {
 
     private func drain() {
         while let frame = nextFrame() {
+            log("ws: frame op=\(frame.opcode) len=\(frame.payload.count)")
             switch frame.opcode {
             case 0x1:
                 if let object = try? JSONSerialization.jsonObject(with: frame.payload),

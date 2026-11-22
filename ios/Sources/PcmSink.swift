@@ -1,5 +1,5 @@
-// Audio on iOS: the sender gives this device raw PCM, so playback is a buffer into AVAudioEngine
-// with no codec in the path.
+// Audio on iOS: raw PCM from the sender, pulled by the audio thread through a ring buffer, so the
+// sound never depends on how evenly the packets happened to arrive.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AVFoundation
 import Darwin
@@ -8,30 +8,84 @@ import LuchReceive
 
 final class PcmSink: AudioSink, @unchecked Sendable {
     private let fd: Int32
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private var format: AVAudioFormat?
+    private let sampleRate = 48_000.0
+    private let channels = 2
+    private var engine: AVAudioEngine?
+    private var source: AVAudioSourceNode?
     private var running = true
+
     private let lock = NSLock()
-    private var framed = 0
+    private var ring: [Float] = []
+    private var readIndex = 0
+    private var underruns = 0
+    private var played = 0
+    private var appended = 0
+
+    /// Counters for the on-screen status line: what arrived, what was rendered, what was missing.
+    var counters: (appended: Int, played: Int, underruns: Int, queued: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (appended, played, underruns, (ring.count - readIndex) / 2)
+    }
+
+    /// Height of the ring: enough to ride out Wi-Fi jitter without adding a visible delay.
+    private let ringLimit = 48_000 * 2 / 4  // a quarter of a second of stereo samples
 
     init(fd: Int32) {
         self.fd = fd
+        ring.reserveCapacity(ringLimit * 2)
     }
 
     func start() {
-        // The engine has to be reached from the main thread; a background thread kills the process.
+        // The engine must be built on the main thread; a background thread kills the process.
         let setup = {
-            guard let pcm = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2) else { return }
-            self.format = pcm
-            self.engine.attach(self.player)
-            self.engine.connect(self.player, to: self.engine.mainMixerNode, format: pcm)
+            // Without a session the engine has no proper output route, and the sound arrives as clicks.
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try? session.setPreferredIOBufferDuration(0.005)
+            try? session.setActive(true)
+            guard let format = AVAudioFormat(standardFormatWithSampleRate: self.sampleRate, channels: 2)
+            else { return }
+            let engine = AVAudioEngine()
+            let source = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
+                guard let self else { return noErr }
+                let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+                self.lock.lock()
+                for frame in 0..<Int(frameCount) {
+                    let left: Float
+                    let right: Float
+                    if self.readIndex + 1 < self.ring.count {
+                        left = self.ring[self.readIndex]
+                        right = self.ring[self.readIndex + 1]
+                        self.readIndex += 2
+                    } else {
+                        left = 0
+                        right = 0
+                        self.underruns += 1
+                    }
+                    self.played += 1
+                    for (channel, buffer) in buffers.enumerated() {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        data[frame] = channel == 0 ? left : right
+                    }
+                }
+                // Reclaim what has been played.
+                if self.readIndex > 8192 {
+                    self.ring.removeFirst(self.readIndex)
+                    self.readIndex = 0
+                }
+                self.lock.unlock()
+                return noErr
+            }
+            engine.attach(source)
+            engine.connect(source, to: engine.mainMixerNode, format: format)
             do {
-                try self.engine.start()
-                self.player.play()
+                try engine.start()
             } catch {
                 NSLog("Luch PCM: engine failed: %@", error.localizedDescription)
             }
+            self.engine = engine
+            self.source = source
         }
         if Thread.isMainThread { setup() } else { DispatchQueue.main.sync(execute: setup) }
         Thread.detachNewThread { [weak self] in self?.readLoop() }
@@ -41,10 +95,13 @@ final class PcmSink: AudioSink, @unchecked Sendable {
         running = false
         close(fd)
         DispatchQueue.main.async {
-            self.player.stop()
-            self.engine.stop()
+            self.source.map { self.engine?.detach($0) }
+            self.engine?.stop()
         }
     }
+
+    /// A PCM frame is bigger than one datagram, so the shards are joined before anything is played.
+    private var partial: [UInt32: [UInt16: [UInt8]]] = [:]
 
     private func readLoop() {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
@@ -54,32 +111,41 @@ final class PcmSink: AudioSink, @unchecked Sendable {
                 if n <= 0 { break }
                 continue
             }
-            // 24-byte header, then the payload this frame's length says.
-            let length = Int(buffer[16]) << 24 | Int(buffer[17]) << 16 | Int(buffer[18]) << 8 | Int(buffer[19])
-            let start = Proto.headerSize
-            let end = min(n, start + max(0, length))
-            guard end > start else { continue }
-            let payload = Array(buffer[start..<end])
-            play(payload)
+            let shard = UInt16(buffer[2]) << 8 | UInt16(buffer[3])
+            let shards = UInt16(buffer[4]) << 8 | UInt16(buffer[5])
+            let seq = UInt32(buffer[8]) << 24 | UInt32(buffer[9]) << 16 | UInt32(buffer[10]) << 8 | UInt32(buffer[11])
+            let payload = Array(buffer[Proto.headerSize..<n])
+            guard shards > 0 else { continue }
+            if shards == 1 {
+                append(payload)
+                continue
+            }
+            partial[seq, default: [:]][shard] = payload
+            if partial[seq]?.count == Int(shards) {
+                var frame: [UInt8] = []
+                for index in 0..<Int(shards) {
+                    if let part = partial[seq]?[UInt16(index)] { frame.append(contentsOf: part) }
+                }
+                partial[seq] = nil
+                if partial.count > 32 { partial.removeAll() }
+                append(frame)
+            }
         }
     }
 
-    private func play(_ pcmInt16: [UInt8]) {
-        guard let format else { return }
-        let frames = pcmInt16.count / 4  // two channels of two bytes
-        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))
-        else { return }
-        buffer.frameLength = AVAudioFrameCount(frames)
-        guard let channel = buffer.floatChannelData else { return }
-        for index in 0..<frames {
-            let left = Int16(bitPattern: UInt16(pcmInt16[index * 4]) | UInt16(pcmInt16[index * 4 + 1]) << 8)
-            let right = Int16(bitPattern: UInt16(pcmInt16[index * 4 + 2]) | UInt16(pcmInt16[index * 4 + 3]) << 8)
-            channel[0][index] = Float(left) / 32768.0
-            channel[1][index] = Float(right) / 32768.0
-        }
+    private func append(_ int16: [UInt8]) {
+        let frames = int16.count / 4
+        guard frames > 0 else { return }
         lock.lock()
-        framed += 1
+        appended += frames
+        for index in 0..<frames {
+            let left = Int16(bitPattern: UInt16(int16[index * 4]) | UInt16(int16[index * 4 + 1]) << 8)
+            let right = Int16(bitPattern: UInt16(int16[index * 4 + 2]) | UInt16(int16[index * 4 + 3]) << 8)
+            ring.append(Float(left) / 32768.0)
+            ring.append(Float(right) / 32768.0)
+        }
+        // A lagging ring would turn into delay, so the oldest samples go first.
+        if ring.count - readIndex > ringLimit { underruns += 1; readIndex = max(0, ring.count - ringLimit) }
         lock.unlock()
-        player.scheduleBuffer(buffer, completionHandler: nil)
     }
 }

@@ -19,7 +19,8 @@ public final class PcmAudio {
     private var frameSamples: Int { sampleRate * frameMs / 1000 }
 
     public init(frameMs: Int = Proto.audioFrameMs) {
-        self.frameMs = frameMs
+        // A 10 ms stereo frame is 1920 bytes, bigger than a shard; 5 ms fits one datagram.
+        self.frameMs = min(frameMs, 5)
     }
 
     public func push(_ sampleBuffer: CMSampleBuffer) {

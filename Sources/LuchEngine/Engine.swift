@@ -286,7 +286,12 @@ public final class Engine: @unchecked Sendable {
         warmth = options.warmth
         let identity = senderIdentity()
 
-        guard let ctl = ControlChannel.open(ip: r.address, port: r.port, interfaceIndex: r.interfaceIndex)
+        // Discovery may report the interface a device was announced on, which is not always the one
+        // with a route to its address; the default route is a fair second try.
+        guard
+            let ctl =
+                ControlChannel.open(ip: r.address, port: r.port, interfaceIndex: r.interfaceIndex)
+                ?? ControlChannel.open(ip: r.address, port: r.port, interfaceIndex: 0)
         else {
             throw EngineError.cannotConnect("\(r.address):\(r.port)")
         }
@@ -301,7 +306,7 @@ public final class Engine: @unchecked Sendable {
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
         self.caps = caps
         log(caps.describe())
-        usingPCM = caps.audio.contains("pcm")
+        usingPCM = caps.audio.contains("audio/pcm")
         let plan = CodecPlanner.plan(caps: caps, receiverID: r.id, options: options)
         self.plan = plan
         deviceOnBattery = caps.onBattery
@@ -379,7 +384,7 @@ public final class Engine: @unchecked Sendable {
                     self.audioFrames += 1
                 }
                 pcm = encoder
-                log("audio: pcm \(encoder.sampleRate) Hz x2, \(options.audioFrameMs) ms frames")
+                log("audio: pcm \(encoder.sampleRate) Hz x2, \(encoder.frameMs) ms frames")
             } else {
                 audio = OpusAudio(
                     bitrate: audioBps, frameMs: options.audioFrameMs,
@@ -548,7 +553,7 @@ public final class Engine: @unchecked Sendable {
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
         self.caps = caps
         log(caps.describe())
-        usingPCM = caps.audio.contains("pcm")
+        usingPCM = caps.audio.contains("audio/pcm")
         let plan = CodecPlanner.plan(caps: caps, receiverID: "web", options: options)
         self.plan = plan
         log(
@@ -606,7 +611,7 @@ public final class Engine: @unchecked Sendable {
                     self.audioFrames += 1
                 }
                 pcm = encoder
-                log("audio: pcm \(encoder.sampleRate) Hz x2, \(options.audioFrameMs) ms frames")
+                log("audio: pcm \(encoder.sampleRate) Hz x2, \(encoder.frameMs) ms frames")
             } else {
                 self.audio = OpusAudio(
                     bitrate: audioBps, frameMs: options.audioFrameMs, fec: options.audioFEC)

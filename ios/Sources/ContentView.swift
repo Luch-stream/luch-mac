@@ -14,6 +14,7 @@ final class VideoRelay: VideoSink {
 }
 
 final class Viewer: ObservableObject, Identifiable {
+    var audio: PcmSink?
     @Published var status = "Ожидание отправителя"
     @Published var stats = ""
     var surface: VideoSurfaceView?
@@ -27,7 +28,11 @@ final class Viewer: ObservableObject, Identifiable {
         guard receiver == nil else { return }
         view.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
         let receiver = Receiver(name: UIDevice.current.name, sink: relay, audioCodecs: ["audio/pcm"])
-        receiver.makeAudio = { PcmSink(fd: $0) }
+        receiver.makeAudio = { [weak self] fd in
+            let sink = PcmSink(fd: fd)
+            DispatchQueue.main.async { self?.audio = sink }
+            return sink
+        }
         receiver.onSession = { [weak self] sender in
             DispatchQueue.main.async {
                 self?.status = sender.map { "Смотрим: \($0)" } ?? "Ожидание отправителя"
@@ -36,9 +41,13 @@ final class Viewer: ObservableObject, Identifiable {
         }
         receiver.onStats = { [weak self] stats in
             DispatchQueue.main.async {
-                let extra = self?.surface.map {
-                    " · enq \($0.enqueued) \($0.lastStatus) v=\(Int($0.bounds.width))x\(Int($0.bounds.height)) l=\(Int($0.displayLayerFrame.width))x\(Int($0.displayLayerFrame.height))"
+                let audioCounters = self?.audio.map { a in
+                    let c = a.counters
+                    return " · a \(c.appended) p \(c.played) u \(c.underruns) q \(c.queued)"
                 } ?? ""
+                let extra = (self?.surface.map {
+                    " · enq \($0.enqueued) \($0.lastStatus) v=\(Int($0.bounds.width))x\(Int($0.bounds.height)) l=\(Int($0.displayLayerFrame.width))x\(Int($0.displayLayerFrame.height))"
+                } ?? "") + audioCounters
                 self?.stats = String(format: "%.0f fps · %.1f ms · потеряно %d", stats.fps, stats.decodeMs, stats.lost) + extra
             }
         }
@@ -56,6 +65,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
             VideoSurface { viewer.attach($0) }
                 .ignoresSafeArea()
             VStack(alignment: .leading, spacing: 4) {
@@ -67,6 +77,5 @@ struct ContentView: View {
             .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
             .padding(12)
         }
-        .background(.black)
     }
 }
