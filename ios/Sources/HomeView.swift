@@ -29,7 +29,10 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     header
+                        .padding(.horizontal, 20)
 
+                    // Full-bleed pager: the card keeps its margins inside, but a swipe that starts
+                    // at the screen edge still lands on the page instead of the parent scroller.
                     TabView(selection: $pageIndex) {
                         receiveCard.tag(0)
                         sendCard.tag(1)
@@ -40,8 +43,8 @@ struct HomeView: View {
                     PageDots(index: $pageIndex, count: 2)
 
                     bottomContainer
+                        .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
                 .padding(.top, 6)
                 .padding(.bottom, 28)
                 .frame(maxWidth: 520)
@@ -120,7 +123,7 @@ struct HomeView: View {
         .padding(.vertical, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 2)
+        .padding(.horizontal, 20)
     }
 
     private var sendCard: some View {
@@ -161,7 +164,7 @@ struct HomeView: View {
         .padding(.vertical, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 2)
+        .padding(.horizontal, 20)
     }
 
     private func cardIcon(_ symbol: String) -> some View {
