@@ -108,7 +108,13 @@ var T = RU ? { connecting: 'Подключение', wait: 'Ожидание т�
                  shortMsg: 'message too short', replay: 'replayed packet', key: 'Key: ',
                  refused: 'The computer refused the connection', noWebCrypto: 'Unencrypted' };
 var ws = null, started = false, stopping = false;
+// Telemetry to the sender's log: a TV has no console to read.
+function report(text) {
+    try { var probe = new Image(); probe.src = '/dbg?m=' + encodeURIComponent(text.slice(0, 400)); } catch (e) {}
+}
+
 function fail(why) {
+    report('ERROR ' + why);
     $('dbg').textContent = String(why).slice(0, 120);
     $('msg').style.display = 'flex';
     $('hint').textContent = String(why).slice(0, 200);
@@ -202,7 +208,10 @@ function initSegment(width, height) {
     var minf = box('minf', [vmhd, dinf, stbl]);
     var mdia = box('mdia', [mdhd, hdlr, minf]);
     var trak = box('trak', [tkhd, mdia]);
-    return new Uint8Array(ftyp.concat(box('moov', [mvhd, trak])));
+    // A fragmented MP4 declares its track in mvex/trex; without it old MSE never finishes the
+    // first append and the buffer stays empty.
+    var mvex = box('mvex', [fullbox('trex', 0, 0, [u32(1), u32(1), u32(0), u32(0), u32(0)])]);
+    return new Uint8Array(ftyp.concat(box('moov', [mvhd, trak, mvex])));
 }
 
 function fragment(pts90, duration, sample) {
@@ -414,7 +423,8 @@ function buildSource() {
     ms.addEventListener('sourceopen', function () {
         try {
             sb = ms.addSourceBuffer(mime);
-            sb.mode = 'segments';
+            // Old WebKit implementations only fill in sequence mode.
+            try { sb.mode = 'sequence'; } catch (e) { sb.mode = 'segments'; }
         } catch (e) { fail('MSE: ' + e.message + ' (' + mime + ')'); return; }
         sb.addEventListener('error', function () { fail('MSE buffer error'); });
         sb.addEventListener('updateend', drain);
@@ -424,9 +434,26 @@ function buildSource() {
 
 function append(data) { queue.push(data); drain(); }
 function appendFragment(pts, duration, sample) { append(fragment(Math.round(pts), duration, sample)); }
+var stalledSince = 0;
+
 function drain() {
-    if (!sb || sb.updating || !queue.length) return;
-    try { sb.appendBuffer(queue.shift()); } catch (e) { fail('append: ' + e.message); return; }
+    if (!sb) return;
+    if (sb.updating) {
+        // A buffer that never finishes an append is stuck: abort and say so once.
+        if (!stalledSince) stalledSince = Date.now();
+        else if (Date.now() - stalledSince > 3000) {
+            stalledSince = 0;
+            try { sb.abort(); } catch (e) {}
+            report('STALL abort, queue=' + queue.length);
+        }
+        return;
+    }
+    stalledSince = 0;
+    if (!queue.length) return;
+    var chunk = queue.shift();
+    // Old implementations want a plain ArrayBuffer.
+    var buffer = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+    try { sb.appendBuffer(buffer); } catch (e) { fail('append: ' + e.message); return; }
     try {
         var start = sb.buffered.start(0), end = sb.buffered.end(0);
         if (end - start > 6) sb.remove(start, end - 4);
@@ -440,10 +467,29 @@ $('v').addEventListener('error', function () {
     var e = $('v').error;
     fail('video: ' + (e && e.message ? e.message : 'ошибка') + (e && e.code ? ' code ' + e.code : ''));
 });
+// The sender may ship a new page while the TV stays on: reload ourselves when the version moves.
+var pageVersion = null;
+setInterval(function () {
+    try {
+        var probe = new XMLHttpRequest();
+        probe.open('GET', '/ver', true);
+        probe.onreadystatechange = function () {
+            if (probe.readyState !== 4 || probe.status !== 200) return;
+            if (pageVersion === null) pageVersion = probe.responseText;
+            else if (pageVersion !== probe.responseText) location.reload();
+        };
+        probe.send();
+    } catch (e) {}
+}, 5000);
+
 // What the page is doing, for a TV with no console.
 setInterval(function () {
     var v = $('v'), b = '-';
     try { if (sb && sb.buffered && sb.buffered.length) b = sb.buffered.end(0).toFixed(1) + 's'; } catch (e) {}
+    report('f=' + frames + ' q=' + queue.length + ' init=' + (initDone ? 1 : 0) +
+            ' ms=' + (ms ? ms.readyState : '-') + ' up=' + (sb ? (sb.updating ? 1 : 0) : '-') +
+            ' buf=' + b + ' t=' + (v.currentTime || 0).toFixed(1) + ' rs=' + v.readyState +
+            ' err=' + (v.error ? v.error.code : '-') + ' mime=' + (mime || '-'));
     $('dbg').textContent = 'f=' + frames + ' q=' + queue.length + ' init=' + (initDone ? 1 : 0) +
         ' ms=' + (ms ? ms.readyState : '-') + ' up=' + (sb ? (sb.updating ? 1 : 0) : '-') +
         ' buf=' + b + ' t=' + (v.currentTime || 0).toFixed(1) +

@@ -173,6 +173,13 @@ public final class WebServer: @unchecked Sendable {
                 socket.start()
                 return
             }
+            if path.hasPrefix("/ver") {
+                return Self.respond(connection, type: "text/plain", body: Data(Self.pageVersion.utf8))
+            }
+            if path.hasPrefix("/dbg"), let message = Self.query(path, "m") {
+                log("web: tv \(message)")
+                return Self.respond(connection, type: "text/plain", body: Data())
+            }
             // A phone camera reads this instead of typing six digits.
             if path.hasPrefix("/qr.png"), let code = Self.query(path, "code") {
                 let link = "http://\(self.ipAddress):\(Proto.caPort)/tv#c=\(code)"
@@ -207,6 +214,16 @@ public final class WebServer: @unchecked Sendable {
     }
 
     private var ipAddress: String = ""
+
+    /// A short hash of both pages: the TV asks for it and reloads itself when the sender updates.
+    static let pageVersion: String = {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in Array((WebPage.html + WebPage.tv).utf8) {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        return String(hash, radix: 16)
+    }()
 
     private static func query(_ path: String, _ key: String) -> String? {
         guard let question = path.firstIndex(of: "?") else { return nil }
@@ -322,6 +339,13 @@ public final class WebServer: @unchecked Sendable {
                 return
             }
 
+            if path.hasPrefix("/ver") {
+                return Self.respond(connection, type: "text/plain", body: Data(Self.pageVersion.utf8))
+            }
+            if path.hasPrefix("/dbg"), let message = Self.query(path, "m") {
+                log("web: tv \(message)")
+                return Self.respond(connection, type: "text/plain", body: Data())
+            }
             let body = path.hasPrefix("/tv") ? Data(WebPage.tv.utf8) : Data(WebPage.html.utf8)
             let response = """
                 HTTP/1.1 200 OK\r
