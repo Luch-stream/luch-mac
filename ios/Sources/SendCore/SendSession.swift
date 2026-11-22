@@ -206,6 +206,12 @@ final class SendSession: @unchecked Sendable {
     private static func udpSocket(to host: String, port: UInt16) -> Int32 {
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { return -1 }
+        // Never block the capture thread: a datagram that cannot go now is dropped, the next one
+        // will carry a newer picture anyway.
+        let flags = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        var size: Int32 = 2 << 20
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
