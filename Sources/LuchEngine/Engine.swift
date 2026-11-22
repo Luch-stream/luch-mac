@@ -124,7 +124,7 @@ public struct MirrorOptions {
     public init() {}
 }
 
-public struct SessionStats {
+public struct SessionStats: Sendable {
     public var fps: Double
     public var mbps: Double
     public var hostMs: Double

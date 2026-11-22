@@ -108,7 +108,7 @@ final class Preferences: @unchecked Sendable {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private let discovery = Discovery()
@@ -155,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
 
         discovery.onUpdate = { [weak self] in
-            DispatchQueue.main.async { self?.refreshReceivers() }
+            Task { @MainActor in self?.refreshReceivers() }
         }
         discovery.start()
         let identity = senderIdentity()
@@ -180,10 +180,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let server = LocalServer()
         server.handler = { [weak self] request in
             guard let self else { return ["error": "app is shutting down"] }
-            var response: [String: Any] = [:]
-            // The socket thread must not touch AppKit state directly.
-            DispatchQueue.main.sync { response = self.handleLocal(request) }
-            return response
+            // The socket thread must not touch AppKit state directly. The boxes carry the plain
+            // dictionaries across; the work itself happens on the main thread, synchronously.
+            let inBox = SendBox(request)
+            let outBox = SendBox<[String: Any]>([:])
+            DispatchQueue.main.sync { outBox.value = self.handleLocal(inBox.value) }
+            return outBox.value
         }
         do {
             try server.start()
@@ -632,7 +634,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.global(qos: .userInitiated).async {
                 old.stop(reason: "switch")
                 Thread.sleep(forTimeInterval: 0.8)
-                DispatchQueue.main.async { [weak self] in self?.beginMirror(receiver) }
+                Task { @MainActor [weak self] in self?.beginMirror(receiver) }
             }
             return
         }
@@ -681,13 +683,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         options.profile = profileOverride
         let engine = Engine(options: options)
         engine.onStats = { [weak self] stats in
-            DispatchQueue.main.async { self?.apply(stats) }
+            Task { @MainActor in self?.apply(stats) }
         }
         engine.onHot = { [weak self] hot, headroom in
-            DispatchQueue.main.async { self?.receiverHot(hot, headroom: headroom) }
+            Task { @MainActor in self?.receiverHot(hot, headroom: headroom) }
         }
         engine.onStopped = { [weak self] reason in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 guard let self, self.engine == nil else { return }  // replaced by a newer session
                 self.currentReceiverID = nil
                 self.state = "Idle (\(reason))"
@@ -707,12 +709,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try engine.start(receiver: receiver)
                 let codec = engine.plan?.codec.label ?? ""
                 let batteryNote = engine.deviceOnBattery ? " · 🔋 on battery" : ""
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self?.state = "Mirroring to \(receiver.name) · \(codec)\(batteryNote)"
                     self?.rebuildMenu()
                 }
             } catch {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self?.state = "Error: \(error.localizedDescription)"
                     self?.engine = nil
                     self?.rebuildMenu()
@@ -751,7 +753,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
         DispatchQueue.global(qos: .userInitiated).async {
             engine.stop(reason: "menu")
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.state = "Idle"
                 self?.rebuildMenu()
             }

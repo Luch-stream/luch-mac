@@ -6,7 +6,7 @@ import Foundation
 import LuchProto
 import dnssd
 
-public struct Receiver {
+public struct Receiver: Sendable {
     public var id: String
     public var name: String
     public var model: String

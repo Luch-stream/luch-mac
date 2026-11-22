@@ -1,10 +1,9 @@
 // swift-tools-version:6.0
 import PackageDescription
 
-// The core (protocol, media, net, engine, receive, audio) is Swift 6: data crossing threads is
-// checked there. The AppKit/CLI layer still runs in language mode 5 while its main-actor
-// boundaries are moved one by one, so the package builds today and tightens later.
-let uiMode: [SwiftSetting] = [.swiftLanguageMode(.v5)]
+// Everything is Swift 6 now: the core modules check data crossing threads, and the AppKit layer
+// reaches the main actor explicitly instead of relying on a language mode that does not check it.
+let uiMode: [SwiftSetting] = [.swiftLanguageMode(.v6)]
 
 let package = Package(
     name: "Luch",
