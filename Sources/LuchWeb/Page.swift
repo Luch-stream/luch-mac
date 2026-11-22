@@ -208,7 +208,7 @@ enum WebPage {
         "document.body.ondblclick = () =>",
         "  document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});",
         "</script>",
-        ""
+        "",
     ].joined(separator: "\n")
     /// The tv page.
     static let tv = [
@@ -230,7 +230,7 @@ enum WebPage {
         "<canvas id=\"probe\" style=\"display:none\"></canvas>",
         "<video id=\"v\" muted playsinline></video>",
         "<div id=\"stats\"></div>",
-        "<div id=\"msg\"><h1>Luch</h1><p id=\"hint\">Нажмите, чтобы принимать трансляцию с компьютера</p><button id=\"go\" autofocus>Смотреть</button></div>",
+        "<div id=\"msg\"><h1>Luch</h1><img id=\"qr\" style=\"display:none;width:38vmin;height:38vmin;background:#fff;padding:1.2vmin;border-radius:1vmin\"><p id=\"hint\">Нажмите, чтобы принимать трансляцию с компьютера</p><button id=\"go\" autofocus>Смотреть</button></div>",
         "<script>",
         "'use strict';",
         "var $ = function (id) { return document.getElementById(id); };",
@@ -426,8 +426,11 @@ enum WebPage {
         "        };",
         "        if (encMode) {",
         "            salt = rand(16);",
-        "            pairCode = String(100000 + Math.floor(Math.random() * 900000));",
-        "            $('hint').textContent = 'Код для подключения: ' + pairCode + ' — подтвердите на компьютере';",
+        "            var preset = /#c=([0-9]{6})/.exec(location.hash);",
+        "            pairCode = preset ? preset[1] : String(100000 + Math.floor(Math.random() * 900000));",
+        "            $('qr').src = '/qr.png?code=' + pairCode;",
+        "            $('qr').style.display = 'block';",
+        "            $('hint').textContent = 'Код: ' + pairCode + ' — подтвердите на компьютере или отсканируйте QR';",
         "            hello.enc = 'aes-gcm';",
         "            hello.salt = b64(salt);",
         "            hello.code = pairCode;",
@@ -560,6 +563,6 @@ enum WebPage {
         "};",
         "</script>",
         "</html>",
-        ""
+        "",
     ].joined(separator: "\n")
 }

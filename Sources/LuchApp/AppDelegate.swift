@@ -203,16 +203,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                         return
                     }
                     let name = message["model"] as? String ?? "browser"
-                    let accepted = self.confirmPairing(name: name, code: code)
-                    guard accepted else {
-                        socket.close()
+                    if !self.approvedRecently(code) {
+                        // Ask in the menu, not in a modal dialog: a dialog would freeze the app while
+                        // the browser waits, and the menu stays usable either way.
+                        let request = PendingPairing(socket: socket, name: name, code: code, salt: salt)
+                        Task { @MainActor in
+                            self.pendingPairings[code] = request
+                            self.rebuildMenu()
+                            log("web: browser \(name) asks to pair, code \(code)")
+                        }
                         return
                     }
-                    let secure = EncryptedSocket(socket: socket)
-                    secure.activate(SecureChannel(code: code, salt: salt))
-                    socket.send(["t": "ok"])  // the page derives the key from the same code now
-                    secure.onText = socket.onText
-                    channel = secure
+                    channel = self.secureChannel(for: socket, code: code, salt: salt)
                 }
                 let client = WebClient(socket: channel, hello: message)
                 socket.send(client.welcome)
@@ -241,8 +243,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
     }
 
+    /// A code approved a moment ago lets the phone that scanned the same QR in without a second
+    /// prompt: the person already said yes to this code.
+    private var approvedCode: (code: String, at: Date)?
+    /// Browsers waiting for the person here to allow them; the menu lists them, nothing blocks.
+    private struct PendingPairing {
+        let socket: WebSocketConnection
+        let name: String
+        let code: String
+        let salt: Data
+    }
+    private var pendingPairings: [String: PendingPairing] = [:]
+
+    private func approvedRecently(_ code: String) -> Bool {
+        guard let approved = approvedCode, approved.code == code else { return false }
+        return Date().timeIntervalSince(approved.at) < 300
+    }
+
+    private func secureChannel(for socket: WebSocketConnection, code: String, salt: Data) -> MessageSocket {
+        let secure = EncryptedSocket(socket: socket)
+        secure.activate(SecureChannel(code: code, salt: salt))
+        socket.send(["t": "ok"])  // the page derives the key from the same code now
+        return secure
+    }
+
+    @objc private func allowPairing(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String, let request = pendingPairings[code] else {
+            return
+        }
+        pendingPairings[code] = nil
+        approvedCode = (code, Date())
+        let socket = request.socket
+        let secure = secureChannel(for: socket, code: code, salt: request.salt)
+        socket.onText = { [weak self] message in
+            guard let self, (message["t"] as? String) == "hello" else { return }
+            let client = WebClient(socket: secure, hello: message)
+            socket.send(client.welcome)
+            self.register(client: client, socket: socket)
+        }
+        rebuildMenu()
+    }
+
+    @objc private func denyPairing(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String, let request = pendingPairings[code] else {
+            return
+        }
+        pendingPairings[code] = nil
+        request.socket.send(["t": "deny"])
+        request.socket.close()
+        rebuildMenu()
+    }
+
+    private func register(client: WebClient, socket: WebSocketConnection) {
+        socket.onClosed = { [weak self] in
+            Task { @MainActor in
+                self?.webClients[client.id] = nil
+                self?.refreshReceivers()
+                log("web: \(client.name) disconnected")
+            }
+        }
+        webClients[client.id] = client
+        refreshReceivers()
+        log("web: \(client.name) connected")
+    }
+
     /// One dialog per browser: the TV shows the code, the person here just agrees.
     private func confirmPairing(name: String, code: String) -> Bool {
+        if let approved = approvedCode, approved.code == code, Date().timeIntervalSince(approved.at) < 300 {
+            return true
+        }
         var accepted = false
         let work = {
             NSApp.setActivationPolicy(.regular)
@@ -256,6 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             NSApp.setActivationPolicy(.accessory)
         }
         if Thread.isMainThread { work() } else { DispatchQueue.main.sync(execute: work) }
+        if accepted { approvedCode = (code, Date()) }
         return accepted
     }
 

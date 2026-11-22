@@ -1,6 +1,8 @@
 // The browser receiver's server: one HTTPS listener that serves the page and upgrades /ws to a
 // WebSocket, where a browser behaves like any other receiver.
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AppKit
+import CoreImage
 import Foundation
 import LuchProto
 import Network
@@ -139,6 +141,13 @@ public final class WebServer: @unchecked Sendable {
                 socket.start()
                 return
             }
+            // A phone camera reads this instead of typing six digits.
+            if path.hasPrefix("/qr.png"), let code = Self.query(path, "code") {
+                let link = "http://\(self.ipAddress):\(Proto.caPort)/tv#c=\(code)"
+                if let png = Self.qrCode(link, scale: 8) {
+                    return Self.respond(connection, type: "image/png", body: png)
+                }
+            }
             let ca = self.identity?.caCertificatePEM() ?? Data()
             let body: Data
             var type = "text/html; charset=utf-8"
@@ -164,6 +173,43 @@ public final class WebServer: @unchecked Sendable {
     }
 
     private var ipAddress: String = ""
+
+    private static func query(_ path: String, _ key: String) -> String? {
+        guard let question = path.firstIndex(of: "?") else { return nil }
+        for pair in path[path.index(after: question)...].split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            if parts.count == 2, parts[0] == key { return String(parts[1]) }
+        }
+        return nil
+    }
+
+    private static func respond(_ connection: NWConnection, type: String, body: Data) {
+        let head = """
+            HTTP/1.1 200 OK\r
+            Content-Type: \(type)\r
+            Content-Length: \(body.count)\r
+            Cache-Control: no-store\r
+            Connection: close\r
+            \r
+
+            """
+        var out = Data(head.utf8)
+        out.append(body)
+        connection.send(content: out, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    /// The pairing link as a QR: CoreImage draws it, no dependency needed.
+    private static func qrCode(_ text: String, scale: CGFloat) -> Data? {
+        let filter = CIFilter(name: "CIQRCodeGenerator")
+        filter?.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter?.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter?.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let context = CIContext()
+        guard let cg = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        return rep.representation(using: .png, properties: [:])
+    }
 
     private static func trustPage(ip: String) -> String {
         """
