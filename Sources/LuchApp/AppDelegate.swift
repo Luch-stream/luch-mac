@@ -171,11 +171,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         let identity = senderIdentity()
         let discovery = self.discovery
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] in
             // Bonjour browsing/registration and the local API socket: none of it on the main queue.
             discovery.start()
             discovery.publish(name: identity.name, id: identity.id)
-            DispatchQueue.main.async { self?.startLocalServer() }
+            await MainActor.run { self?.startLocalServer() }
         }
 
         rebuildMenu()
@@ -252,17 +252,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         // TLS setup (certificate generation) and the listeners are slow; the menu bar must not wait.
         let address = webAddress()
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task.detached(priority: .userInitiated) {
             do {
                 try server.start(port: Proto.webPort, ip: address)
-                Task { @MainActor in
+                await MainActor.run {
                     self.web = server
                     if let ip = address {
                         self.webURL = URL(string: "https://\(ip):\(Proto.webPort)/")
                     }
                 }
             } catch {
-                Task { @MainActor in
+                await MainActor.run {
                     log("web: not started: \(error.localizedDescription)")
                 }
             }

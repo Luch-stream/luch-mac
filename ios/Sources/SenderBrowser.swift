@@ -67,6 +67,9 @@ final class SenderBrowser {
     private func restart() {
         stop()
         // A short delay keeps a flapping network from spinning the browser.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.start() }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.start()
+        }
     }
 }

@@ -94,14 +94,12 @@ final class Viewer {
             }
         }
         self.receiver = receiver
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try receiver.start()
             } catch {
                 // The port or the Bonjour registration is unavailable; retrying recreates it.
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self?.phase = .failed }
-                }
+                await MainActor.run { self?.phase = .failed }
             }
         }
     }
