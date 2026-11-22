@@ -5,8 +5,14 @@ import LuchReceive
 import SwiftUI
 import UIKit
 
+/// `enqueue` comes from the decoder thread while `flush` comes from the main actor when a session
+/// ends. AVSampleBufferDisplayLayer is not safe for those two at once, so both run on one serial
+/// queue; the debug counters are read through the same queue.
 final class VideoSurfaceView: UIView, @preconcurrency VideoSink {
     private let displayLayer = AVSampleBufferDisplayLayer()
+    private let layerQueue = DispatchQueue(label: "dev.luch.video-surface")
+    private var enqueuedCount = 0
+    private var status = ""
     var onBroken: (() -> Void)?
 
     override init(frame: CGRect) {
@@ -21,33 +27,48 @@ final class VideoSurfaceView: UIView, @preconcurrency VideoSink {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        displayLayer.frame = bounds
-        CATransaction.commit()
+        let bounds = bounds
+        layerQueue.sync {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            displayLayer.frame = bounds
+            CATransaction.commit()
+        }
     }
 
-    var enqueued = 0
-    var lastStatus = ""
-    var displayLayerFrame: CGRect { displayLayer.frame }
+    var enqueued: Int { layerQueue.sync { enqueuedCount } }
+    var lastStatus: String { layerQueue.sync { status } }
+    var displayLayerFrame: CGRect { layerQueue.sync { displayLayer.frame } }
 
     func enqueue(_ sample: CMSampleBuffer) {
-        enqueued += 1
-        lastStatus = displayLayer.status == .failed ? "failed" : (displayLayer.status == .rendering ? "render" : "wait")
-        if displayLayer.status == .failed {
-            displayLayer.flush()
-            onBroken?()
+        var broke = false
+        layerQueue.sync {
+            enqueuedCount += 1
+            status =
+                displayLayer.status == .failed
+                ? "failed" : (displayLayer.status == .rendering ? "render" : "wait")
+            if displayLayer.status == .failed {
+                displayLayer.flush()
+                broke = true
+            }
+            displayLayer.enqueue(sample)
         }
-        displayLayer.enqueue(sample)
+        // Never call back into the app while the layer queue is held: the handler hops to main.
+        if broke { onBroken?() }
     }
 
     func flush() {
-        displayLayer.flush()
+        layerQueue.sync { displayLayer.flush() }
     }
 }
 
 struct VideoSurface: UIViewRepresentable {
     let onReady: (VideoSurfaceView) -> Void
+    var onDismantle: (VideoSurfaceView) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDismantle: onDismantle)
+    }
 
     func makeUIView(context: Context) -> VideoSurfaceView {
         let view = VideoSurfaceView()
@@ -56,4 +77,17 @@ struct VideoSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ view: VideoSurfaceView, context: Context) {}
+
+    static func dismantleUIView(_ view: VideoSurfaceView, coordinator: Coordinator) {
+        view.onBroken = nil
+        coordinator.onDismantle(view)
+    }
+
+    final class Coordinator {
+        let onDismantle: (VideoSurfaceView) -> Void
+
+        init(onDismantle: @escaping (VideoSurfaceView) -> Void) {
+            self.onDismantle = onDismantle
+        }
+    }
 }

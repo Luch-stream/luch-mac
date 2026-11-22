@@ -47,7 +47,7 @@ final class PcmSink: AudioSink, @unchecked Sendable {
         let setup = {
             // Without a session the engine has no proper output route, and the sound arrives as clicks.
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try? session.setPreferredIOBufferDuration(0.005)
             try? session.setActive(true)
             guard let format = AVAudioFormat(standardFormatWithSampleRate: self.sampleRate, channels: 2)

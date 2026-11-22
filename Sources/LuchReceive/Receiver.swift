@@ -40,6 +40,12 @@ public final class Receiver {
         server.owner = self
     }
 
+    /// Ends the current session but keeps discovery alive: the sender is told to stop and the
+    /// device stays visible to senders, unlike recreating the whole receiver.
+    public func stopSession() {
+        server.stopSession()
+    }
+
     public func start() throws {
         try server.start()
     }
@@ -63,6 +69,8 @@ final class Control {
     let fd: Int32
     private let lock = NSLock()
     var mirroredID: String?
+    /// The name the sender gave in its hello, so a panel can say whose screen this is.
+    var senderName: String?
 
     init(fd: Int32) { self.fd = fd }
 
@@ -241,6 +249,7 @@ final class ControlServer {
         switch message["t"] as? String {
         case "hello":
             let sender = message["name"] as? String ?? "sender"
+            control.senderName = sender
             log("viewer: hello from \(sender)")
             let welcome = ReceiveCaps.welcome(
                 name: name, id: id, accepting: owner?.accepting ?? true, audioCodecs: audioCodecs)
@@ -292,7 +301,14 @@ final class ControlServer {
     }
 
     private func senderName(from control: Control) -> String {
-        control.mirroredID ?? "sender"
+        control.senderName ?? control.mirroredID ?? "sender"
+    }
+
+    func stopSession() {
+        if let control = current {
+            control.send(["t": "stop"])
+        }
+        endSession()
     }
 
     func requestKeyframe() {

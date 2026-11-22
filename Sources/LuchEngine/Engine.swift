@@ -272,6 +272,8 @@ public final class Engine: @unchecked Sendable {
     private var lastBytes: UInt64 = 0
     private var lastLatency: UInt64 = 0
     private var audioFrames: UInt64 = 0
+    private var audioDump: FileHandle?
+    private var audioDumpLog: FileHandle?
 
     public init(options: MirrorOptions) {
         self.options = options
@@ -384,8 +386,19 @@ public final class Engine: @unchecked Sendable {
             if options.audioBitrate == 0 { log("audio: auto bitrate \(audioBps / 1000) kbit/s") }
             if usingPCM {
                 let encoder = PcmAudio(frameMs: options.audioFrameMs)
+                let dumpPath = ProcessInfo.processInfo.environment["LUCH_AUDIO_DUMP"] ?? UserDefaults.standard.string(forKey: "audioDump")
                 encoder.onPacket = { [weak self] data, pts in
                     guard let self, let tx = self.audioTx else { return }
+                    if let dumpPath, let handle = self.audioDump ?? Self.openDump(dumpPath) {
+                        self.audioDump = handle
+                        handle.write(data)
+                        if self.audioDumpLog == nil {
+                            self.audioDumpLog = Self.openDump(dumpPath + ".log")
+                        }
+                        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+                        let line = String(format: "%.6f %.6f\n", pts.seconds, now)
+                        self.audioDumpLog?.write(Data(line.utf8))
+                    }
                     let latency = self.hostLatency(pts)
                     tx.send(
                         frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
@@ -615,8 +628,19 @@ public final class Engine: @unchecked Sendable {
                 : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
             if usingPCM {
                 let encoder = PcmAudio(frameMs: options.audioFrameMs)
+                let dumpPath = ProcessInfo.processInfo.environment["LUCH_AUDIO_DUMP"] ?? UserDefaults.standard.string(forKey: "audioDump")
                 encoder.onPacket = { [weak self] data, pts in
                     guard let self, let tx = self.audioTx else { return }
+                    if let dumpPath, let handle = self.audioDump ?? Self.openDump(dumpPath) {
+                        self.audioDump = handle
+                        handle.write(data)
+                        if self.audioDumpLog == nil {
+                            self.audioDumpLog = Self.openDump(dumpPath + ".log")
+                        }
+                        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+                        let line = String(format: "%.6f %.6f\n", pts.seconds, now)
+                        self.audioDumpLog?.write(Data(line.utf8))
+                    }
                     let latency = self.hostLatency(pts)
                     tx.send(
                         frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
@@ -792,6 +816,21 @@ public final class Engine: @unchecked Sendable {
         guard let base = basePTS else { return 0 }
         let us = (CMTimeGetSeconds(pts) - CMTimeGetSeconds(base)) * 1_000_000
         return UInt32(truncatingIfNeeded: max(0, Int64(us)))
+    }
+
+    private static func openDump(_ path: String) -> FileHandle? {
+        FileManager.default.createFile(atPath: path, contents: nil)
+        return try? FileHandle(forWritingTo: URL(fileURLWithPath: path))
+    }
+
+    /// One line per frame next to the raw PCM: the capture time and the moment it left.
+    private func dumpLine(pts: CMTime) {
+        guard let dumpPath = ProcessInfo.processInfo.environment["LUCH_AUDIO_DUMP"] ?? UserDefaults.standard.string(forKey: "audioDump") else { return }
+        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let line = String(format: "%.6f %.6f\n", pts.seconds, now)
+        if let data = line.data(using: .utf8) {
+            audioDump?.write(data)
+        }
     }
 
     private func hostLatency(_ pts: CMTime) -> UInt16 {
