@@ -623,6 +623,8 @@ enum WebPage {
         "    fail('video: ' + (e && e.message ? e.message : 'ошибка') + (e && e.code ? ' code ' + e.code : ''));",
         "});",
         "$('go').onclick = start;",
+        "// A TV remote has no pointer: try at once, the QR and the code are the whole interface.",
+        "window.addEventListener('load', function () { $('go').style.display = 'none'; start(); });",
         "document.body.ondblclick = function () {",
         "    if (document.fullscreenElement) document.exitFullscreen();",
         "    else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();",
