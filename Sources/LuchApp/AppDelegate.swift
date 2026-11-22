@@ -163,8 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         statusItem.button?.toolTip = "Luch"
         statusItem.menu = menu
 
-        discovery.onUpdate = { [weak self] in
-            Task { @MainActor in self?.refreshReceivers() }
+        let source = discovery
+        receiverTask = Task { @MainActor [weak self] in
+            for await list in source.updates() {
+                self?.applyReceivers(list)
+            }
         }
         let identity = senderIdentity()
         let discovery = self.discovery
@@ -278,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         /// The hello that started it: the answer comes after the user decides, not before.
         let hello: [String: Any]
     }
+    private var receiverTask: Task<Void, Never>?
     private var pendingPairings: [String: PendingPairing] = [:]
     private var localTone: AVAudioPlayer?
     private let latencyLab = LatencyWindow()
@@ -503,7 +507,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     // MARK: - menu
 
     private func refreshReceivers() {
-        receivers = discovery.all() + webClients.values.map(\.receiver)
+        applyReceivers(discovery.all())
+    }
+
+    /// The discovered list plus the browsers that are connected right now.
+    private func applyReceivers(_ discovered: [Receiver]) {
+        receivers = discovered + webClients.values.map(\.receiver)
         rebuildMenu()
     }
 

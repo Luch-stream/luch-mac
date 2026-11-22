@@ -133,8 +133,34 @@ private let registerCallback: DNSServiceRegisterReply = { _, _, err, name, _, _,
     }
 }
 
-public final class Discovery {
+/// The receiver map is guarded by `lock`; the DNS-SD callback runs on its own queue, so the
+/// instance may cross threads as long as every entry point takes the lock.
+public final class Discovery: @unchecked Sendable {
     public var onUpdate: (() -> Void)?
+    /// One stream per consumer: the current list first, then every change.
+    private var listeners: [UUID: AsyncStream<[Receiver]>.Continuation] = [:]
+
+    /// The receivers as they come and go, without callbacks: the UI consumes this in a Task.
+    public func updates() -> AsyncStream<[Receiver]> {
+        AsyncStream { continuation in
+            let id = UUID()
+            listeners[id] = continuation
+            continuation.yield(sortedReceivers())
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in self?.listeners[id] = nil }
+            }
+        }
+    }
+
+    private func sortedReceivers() -> [Receiver] {
+        receivers.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func broadcast() {
+        onUpdate?()
+        let list = sortedReceivers()
+        for continuation in listeners.values { continuation.yield(list) }
+    }
     public private(set) var receivers: [String: Receiver] = [:]  // service instance name -> receiver
     public var published = false
 
@@ -225,7 +251,7 @@ public final class Discovery {
         for receiver in removed {
             log("bonjour: stale: \(receiver.name) (\(receiver.address))")
         }
-        if !removed.isEmpty { onUpdate?() }
+        if !removed.isEmpty { broadcast() }
         return removed.count
     }
 
@@ -245,7 +271,7 @@ public final class Discovery {
             lock.unlock()
             if let removed {
                 log("bonjour: gone: \(removed.name) (\(removed.address))")
-                onUpdate?()
+                broadcast()
             }
         }
     }
@@ -305,7 +331,7 @@ public final class Discovery {
             log(
                 "bonjour: found \(receiver.name) id=\(receiver.id) \(receiver.address):\(receiver.port) via \(receiver.interfaceName)(\(receiver.interfaceIndex))"
             )
-            self.onUpdate?()
+            self.broadcast()
         }
     }
 
