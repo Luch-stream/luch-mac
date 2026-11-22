@@ -6,6 +6,7 @@ import ReplayKit
 import SwiftUI
 
 struct SendView: View {
+    @Binding var pageIndex: Int
     let onSettings: () -> Void
     @State private var configServer = ConfigServer()
     @State private var browser = ReceiverBrowser()
@@ -24,6 +25,8 @@ struct SendView: View {
                 VStack(spacing: 18) {
                     header
                     statusCard
+                    PageDots(index: $pageIndex, count: 2)
+                        .padding(.top, -4)
                     targetsBlock
                 }
                 .padding(.horizontal, 20)

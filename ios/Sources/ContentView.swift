@@ -7,6 +7,11 @@ struct ContentView: View {
     enum Mode: String, CaseIterable { case receive = "Принимать", send = "Отправлять" }
 
     @State private var mode: Mode = .receive
+    private var pageIndex: Binding<Int> {
+        Binding(
+            get: { mode == .receive ? 0 : 1 },
+            set: { mode = $0 == 0 ? .receive : .send })
+    }
     @State private var viewer = Viewer()
     @State private var settingsPresented = false
 
@@ -16,12 +21,11 @@ struct ContentView: View {
 
             // Two pages the user swipes between; the dots below show where they are, and the
             // page content (card, hints, buttons) is rebuilt as the page changes.
-            TabView(selection: $mode) {
-                receiving.tag(Mode.receive)
-                SendView(onSettings: presentSettings).tag(Mode.send)
+            TabView(selection: pageIndex) {
+                receiving.tag(0)
+                SendView(pageIndex: pageIndex, onSettings: presentSettings).tag(1)
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .never))
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background {
             GeometryReader { proxy in
@@ -52,7 +56,7 @@ struct ContentView: View {
     private var receiving: some View {
             switch viewer.phase {
             case .waiting:
-                WaitingView(deviceName: UIDevice.current.name, senders: viewer.senders, onSettings: presentSettings)
+                WaitingView(deviceName: UIDevice.current.name, senders: viewer.senders, pageIndex: pageIndex, onSettings: presentSettings)
                     .transition(.opacity)
             case .streaming:
                 StreamView(

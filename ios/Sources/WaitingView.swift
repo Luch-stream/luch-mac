@@ -6,6 +6,7 @@ import UIKit
 struct WaitingView: View {
     let deviceName: String
     var senders: [SenderBrowser.Sender] = []
+    @Binding var pageIndex: Int
     let onSettings: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -25,6 +26,8 @@ struct WaitingView: View {
                 VStack(spacing: 18) {
                     header
                     statusCard
+                    PageDots(index: $pageIndex, count: 2)
+                        .padding(.top, -4)
                     sendersBlock
                     HintCard(deviceWord: deviceWord, deviceSymbol: deviceSymbol)
                 }

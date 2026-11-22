@@ -206,3 +206,22 @@ struct AmbientBackdrop: View {
         .allowsHitTesting(false)
     }
 }
+
+/// Page dots placed by the screen itself, so they can sit under the card instead of the screen edge.
+struct PageDots: View {
+    @Binding var index: Int
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<count, id: \.self) { dot in
+                Circle()
+                    .fill(dot == index ? LuchStyle.accent : LuchStyle.primaryText.opacity(0.25))
+                    .frame(width: dot == index ? 8 : 7, height: dot == index ? 8 : 7)
+                    .animation(.easeInOut(duration: 0.2), value: index)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Страница \(index + 1) из \(count)")
+    }
+}
