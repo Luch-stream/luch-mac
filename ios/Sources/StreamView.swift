@@ -37,12 +37,14 @@ struct StreamView: View {
                             StatsLine(fps: viewer.fps, latency: viewer.latencyMs)
                             Spacer(minLength: 0)
                         }
+                        .padding(.leading, 8)
                     }
                     ToolbarItemGroup(placement: .bottomBar) {
                         Button {
                             viewer.requestKeyframe()
                         } label: {
                             Image(systemName: "arrow.clockwise")
+                                .frame(width: 24, height: 24)
                         }
                         .accessibilityLabel("Запросить ключевой кадр")
 
@@ -50,13 +52,15 @@ struct StreamView: View {
                             settingsPresented = true
                         } label: {
                             Image(systemName: "gearshape")
+                                .frame(width: 24, height: 24)
                         }
                         .accessibilityLabel("Настройки")
 
                         Button {
                             viewer.disconnect()
                         } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Image(systemName: "arrow.right.square")
+                                .frame(width: 24, height: 24)
                         }
                         .accessibilityLabel("Отключиться")
                     }
