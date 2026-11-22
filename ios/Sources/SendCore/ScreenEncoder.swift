@@ -10,6 +10,9 @@ final class ScreenEncoder {
     /// (annex-b frame, pts in microseconds, isKeyframe)
     var onFrame: (([UInt8], UInt32, Bool) -> Void)?
     var onKeyframeRequest: (() -> Void)?
+    /// Called once, with the first frame's size, so the app can show that media really flows.
+    var onFirstFrame: ((Int) -> Void)?
+    private var reportedFirstFrame = false
 
     private var session: VTCompressionSession?
     private var parameterSets: [UInt8] = []
@@ -35,18 +38,23 @@ final class ScreenEncoder {
                 refcon: nil, compressionSessionOut: &fallback)
             guard h264 == noErr, let fallback else { return nil }
             self.session = fallback
-            configure(fallback, fps: fps, bitrate: bitrate)
+            configure(fallback, codec: kCMVideoCodecType_H264, fps: fps, bitrate: bitrate)
             return
         }
         self.session = session
-        configure(session, fps: fps, bitrate: bitrate)
+        configure(session, codec: kCMVideoCodecType_HEVC, fps: fps, bitrate: bitrate)
     }
 
-    private func configure(_ session: VTCompressionSession, fps: Int, bitrate: Int) {
+    private func configure(
+        _ session: VTCompressionSession, codec: CMVideoCodecType, fps: Int, bitrate: Int
+    ) {
+        // The profile has to match the codec: an HEVC profile on an H.264 session makes the encoder
+        // reject every frame, which looks like a receiver that never gets a picture.
+        let profile: CFString = codec == kCMVideoCodecType_HEVC
+            ? kVTProfileLevel_HEVC_Main_AutoLevel as CFString
+            : kVTProfileLevel_H264_Main_AutoLevel as CFString
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(
-            session, key: kVTCompressionPropertyKey_ProfileLevel,
-            value: kVTProfileLevel_HEVC_Main_AutoLevel as CFString)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
         VTSessionSetProperty(
             session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
         VTSessionSetProperty(
@@ -109,6 +117,10 @@ final class ScreenEncoder {
         }
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let ptsUS = UInt32(max(0, pts.seconds * 1_000_000))
+        if !reportedFirstFrame {
+            reportedFirstFrame = true
+            onFirstFrame?(out.count)
+        }
         onFrame?(out, ptsUS, keyframe)
     }
 

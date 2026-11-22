@@ -47,6 +47,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
         encoder.onFrame = { [weak session] frame, pts, keyframe in
             session?.sendVideo(frame, ptsUS: pts, keyframe: keyframe)
         }
+        encoder.onFirstFrame = { [weak self] size in
+            self?.report("первый кадр \(size) байт")
+        }
         report("кодирую \(outWidth)x\(outHeight) → \(target.host):\(target.port)")
         session.start(to: target, name: "iPhone", width: outWidth, height: outHeight, fps: 30)
         self.encoder = encoder
