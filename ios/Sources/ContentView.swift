@@ -1,21 +1,32 @@
 // Экран приёма: ищем отправителя, показываем картинку и статистику.
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AVFoundation
+import LuchReceive
 import SwiftUI
 import UIKit
-import LuchReceive
+
+/// Frames go to whichever view is on screen right now: SwiftUI may recreate it, and the receiver
+/// keeps a stable sink instead of a view that may already be gone.
+final class VideoRelay: VideoSink {
+    weak var view: VideoSurfaceView?
+    func enqueue(_ sample: CMSampleBuffer) { view?.enqueue(sample) }
+    func flush() { view?.flush() }
+}
 
 final class Viewer: ObservableObject, Identifiable {
     @Published var status = "Ожидание отправителя"
     @Published var stats = ""
     var surface: VideoSurfaceView?
+    let relay = VideoRelay()
 
     private var receiver: Receiver?
 
     func attach(_ view: VideoSurfaceView) {
-        guard receiver == nil else { return }
+        relay.view = view
         surface = view
+        guard receiver == nil else { return }
         view.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
-        let receiver = Receiver(name: UIDevice.current.name, sink: view)
+        let receiver = Receiver(name: UIDevice.current.name, sink: relay)
         receiver.onSession = { [weak self] sender in
             DispatchQueue.main.async {
                 self?.status = sender.map { "Смотрим: \($0)" } ?? "Ожидание отправителя"
@@ -24,8 +35,10 @@ final class Viewer: ObservableObject, Identifiable {
         }
         receiver.onStats = { [weak self] stats in
             DispatchQueue.main.async {
-                self?.stats = String(format: "%.0f fps · %.1f ms · потеряно %d",
-                                     stats.fps, stats.decodeMs, stats.lost)
+                let extra = self?.surface.map {
+                    " · enq \($0.enqueued) \($0.lastStatus) v=\(Int($0.bounds.width))x\(Int($0.bounds.height)) l=\(Int($0.displayLayerFrame.width))x\(Int($0.displayLayerFrame.height))"
+                } ?? ""
+                self?.stats = String(format: "%.0f fps · %.1f ms · потеряно %d", stats.fps, stats.decodeMs, stats.lost) + extra
             }
         }
         do {

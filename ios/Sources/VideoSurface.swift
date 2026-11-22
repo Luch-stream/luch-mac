@@ -5,7 +5,7 @@ import LuchReceive
 import SwiftUI
 import UIKit
 
-final class VideoSurfaceView: UIView, VideoSink {
+final class VideoSurfaceView: UIView, @preconcurrency VideoSink {
     private let displayLayer = AVSampleBufferDisplayLayer()
     var onBroken: (() -> Void)?
 
@@ -27,7 +27,13 @@ final class VideoSurfaceView: UIView, VideoSink {
         CATransaction.commit()
     }
 
+    var enqueued = 0
+    var lastStatus = ""
+    var displayLayerFrame: CGRect { displayLayer.frame }
+
     func enqueue(_ sample: CMSampleBuffer) {
+        enqueued += 1
+        lastStatus = displayLayer.status == .failed ? "failed" : (displayLayer.status == .rendering ? "render" : "wait")
         if displayLayer.status == .failed {
             displayLayer.flush()
             onBroken?()
