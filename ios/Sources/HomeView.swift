@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var configServer = ConfigServer()
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
+    @State private var pickerTrigger = 0
 
     private var sending: Bool { pageIndex == 1 }
     private var deviceName: String { UIDevice.current.name }
@@ -154,17 +155,24 @@ struct HomeView: View {
             }
 
             if chosen != nil {
-                HStack(spacing: 10) {
+                Button {
+                    pickerTrigger += 1
+                } label: {
                     Text("Начать трансляцию")
                         .font(.callout.weight(.semibold))
-                        .foregroundStyle(LuchStyle.primaryText)
-                    BroadcastPicker()
-                        .frame(width: 44, height: 44)
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 11)
+                        .background(LuchStyle.accent, in: Capsule())
                 }
-                .padding(.leading, 18)
-                .padding(.vertical, 4)
-                .background(LuchStyle.accent.opacity(0.18), in: Capsule())
+                .buttonStyle(.plain)
                 .frame(height: 52)
+                .background(alignment: .center) {
+                    BroadcastPicker(trigger: pickerTrigger)
+                        .frame(width: 1, height: 1)
+                        .opacity(0.001)
+                        .allowsHitTesting(false)
+                }
             } else {
                 Color.clear.frame(height: 52)
             }

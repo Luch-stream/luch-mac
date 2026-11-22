@@ -92,6 +92,15 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     /// The app answers with one JSON line: where to send the picture.
     private static func fetchConfig() -> (host: String, port: UInt16, name: String)? {
+        // The app may still be starting its listener; give it a couple of seconds.
+        for _ in 0..<10 {
+            if let config = oneAttempt() { return config }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return nil
+    }
+
+    private static func oneAttempt() -> (host: String, port: UInt16, name: String)? {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
 
@@ -104,7 +113,10 @@ final class SampleHandler: RPBroadcastSampleHandler {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard connected == 0 else { return nil }
+        guard connected == 0 else {
+            close(fd)
+            return nil
+        }
         var buffer = [UInt8](repeating: 0, count: 4096)
         let count = recv(fd, &buffer, buffer.count, 0)
         lastSocket = fd

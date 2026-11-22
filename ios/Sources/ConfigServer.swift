@@ -14,6 +14,13 @@ final class ConfigServer {
     private(set) var status: String = ""
     var onStatus: ((String) -> Void)?
 
+    private func announce(_ text: String) {
+        DispatchQueue.main.async {
+            self.status = text
+            self.onStatus?(text)
+        }
+    }
+
     func start() {
         guard fd < 0 else { return }
         let fd = socket(AF_INET, SOCK_STREAM, 0)
@@ -31,8 +38,10 @@ final class ConfigServer {
         }
         guard bound == 0, listen(fd, 4) == 0 else {
             close(fd)
+            announce("конфиг: порт 47899 занят")
             return
         }
+        announce("конфиг: слушаю 127.0.0.1:47899")
         self.fd = fd
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .global(qos: .userInitiated))
         source.setEventHandler { [weak self] in self?.accept() }
