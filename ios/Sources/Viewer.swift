@@ -32,18 +32,22 @@ final class Viewer {
     private(set) var fps: Double = 0
     private(set) var latencyMs: Double = 0
     private(set) var lostFrames = 0
+    /// Senders this device can see right now, from mDNS. Empty until the browser answers.
+    var senders: [SenderBrowser.Sender] { browser.senders }
 
     @ObservationIgnored let relay = VideoRelay()
     /// Weak: SwiftUI owns the view, and a session must not keep a dismantled one alive.
     @ObservationIgnored private weak var surface: VideoSurfaceView?
     @ObservationIgnored private var audio: PcmSink?
     @ObservationIgnored private var receiver: Receiver?
+    @ObservationIgnored let browser = SenderBrowser()
     /// A session exists but the interface may already be back on the waiting screen.
     @ObservationIgnored private var sessionActive = false
 
     // MARK: - lifecycle
 
     func start() {
+        browser.start()
         guard receiver == nil else { return }
         // Sockets and the Bonjour registration are slow; the first frame must not wait for them.
         // The receiver is built here (it needs the device name), but it listens on its own queue:

@@ -5,6 +5,7 @@ import UIKit
 
 struct WaitingView: View {
     let deviceName: String
+    var senders: [SenderBrowser.Sender] = []
     let onSettings: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -120,16 +121,44 @@ struct WaitingView: View {
                 .foregroundStyle(LuchStyle.secondaryText)
                 .padding(.leading, 6)
 
-            HStack(spacing: 10) {
-                PulseDot(diameter: 8)
-                Text("Пока не найдены")
-                    .font(.callout)
-                    .foregroundStyle(LuchStyle.primaryText)
-                Spacer(minLength: 0)
+            if senders.isEmpty {
+                HStack(spacing: 10) {
+                    PulseDot(diameter: 8)
+                    Text("Пока не найдены")
+                        .font(.callout)
+                        .foregroundStyle(LuchStyle.secondaryText)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
+                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(senders) { sender in
+                        HStack(spacing: 12) {
+                            Image(systemName: "laptopcomputer")
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundStyle(LuchStyle.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sender.name)
+                                    .font(.callout.weight(.medium))
+                                    .foregroundStyle(LuchStyle.primaryText)
+
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        if sender.id != senders.last?.id {
+                            Rectangle()
+                                .fill(LuchStyle.separator)
+                                .frame(height: 0.5)
+                                .padding(.leading, 48)
+                        }
+                    }
+                }
+                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
     }
 

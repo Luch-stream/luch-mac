@@ -13,7 +13,7 @@ struct ContentView: View {
 
             switch viewer.phase {
             case .waiting:
-                WaitingView(deviceName: UIDevice.current.name, onSettings: presentSettings)
+                WaitingView(deviceName: UIDevice.current.name, senders: viewer.senders, onSettings: presentSettings)
                     .transition(.opacity)
             case .streaming:
                 StreamView(
