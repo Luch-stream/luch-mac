@@ -40,6 +40,7 @@ public final class WebServer: @unchecked Sendable {
 
     private var listener: NWListener?
     private var caListener: NWListener?
+    private var extraListeners: [NWListener] = []
     private let queue = DispatchQueue(label: "luch.web.server")
     private var identity: WebIdentity?
     private let directory: URL
@@ -83,21 +84,43 @@ public final class WebServer: @unchecked Sendable {
         listener = nil
         caListener?.cancel()
         caListener = nil
+        for extra in extraListeners { extra.cancel() }
+        extraListeners.removeAll()
     }
 
     /// Plain HTTP on :47802, because a phone cannot download a certificate it does not trust yet.
     private func startCertificateServer(ip: String?) {
         let plain = NWParameters.tcp
         plain.allowLocalEndpointReuse = true
-        guard let listener = try? NWListener(using: plain, on: NWEndpoint.Port(rawValue: Proto.caPort)!)
-        else { return }
-        listener.newConnectionHandler = { [weak self] connection in
-            connection.start(queue: self?.queue ?? .main)
-            self?.serveCertificate(connection, buffer: Data())
+        // The same pages over TLS on 47802: a TV browser that upgrades http to https lands here
+        // instead of meeting a plain socket and reporting a lost connection.
+        let tls = NWProtocolTLS.Options()
+        if let identity { sec_protocol_options_set_local_identity(tls.securityProtocolOptions, identity.identity) }
+        sec_protocol_options_set_peer_authentication_required(tls.securityProtocolOptions, false)
+        let secureParameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        secureParameters.allowLocalEndpointReuse = true
+        if let secure = try? NWListener(using: secureParameters, on: NWEndpoint.Port(rawValue: Proto.caPort)!) {
+            secure.newConnectionHandler = { [weak self] connection in
+                log("web: tls connection on \(Proto.caPort) from \(connection.endpoint)")
+                self?.handle(connection)
+            }
+            secure.start(queue: queue)
+            extraListeners.append(secure)
+            if let ip { log("web: also https://\(ip):\(Proto.caPort)/tv") }
         }
-        listener.start(queue: queue)
-        caListener = listener
-        if let ip { log("web: certificate page on http://\(ip):\(Proto.caPort)/") }
+
+        // Some TV browsers only agree to talk on the usual web ports.
+        for extra in [UInt16(8080)] {
+            guard let more = try? NWListener(using: plain, on: NWEndpoint.Port(rawValue: extra)!) else { continue }
+            more.newConnectionHandler = { [weak self] connection in
+                log("web: connection on \(extra) from \(connection.endpoint)")
+                connection.start(queue: self?.queue ?? .main)
+                self?.serveCertificate(connection, buffer: Data())
+            }
+            more.start(queue: queue)
+            extraListeners.append(more)
+            if let ip { log("web: also on http://\(ip):\(extra)/tv") }
+        }
     }
 
     private func serveCertificate(_ connection: NWConnection, buffer: Data) {
@@ -106,6 +129,15 @@ public final class WebServer: @unchecked Sendable {
             guard let self else { return }
             var buffer = buffer
             if let data { buffer.append(data) }
+            if buffer.count > 0, !buffer.contains(Data("\r\n\r\n".utf8)), buffer.count < 4096 {
+                let head = String(decoding: buffer.prefix(120), as: UTF8.self)
+                log("web: partial \(buffer.count)B „\(head.replacingOccurrences(of: "\r", with: "␍").replacingOccurrences(of: "\n", with: "␊"))”")
+            }
+            if let first = buffer.first, first == 0x16 {
+                log("web: TLS handshake on the plain port — the browser used https://")
+                connection.cancel()
+                return
+            }
             guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
                 if done || error != nil {
                     connection.cancel()
@@ -163,6 +195,8 @@ public final class WebServer: @unchecked Sendable {
                 HTTP/1.1 200 OK\r
                 Content-Type: \(type)\r
                 Content-Length: \(body.count)\r
+                Cache-Control: no-store, no-cache, must-revalidate\r
+                Pragma: no-cache\r
                 \(path.hasPrefix("/ca.crt") ? "Content-Disposition: attachment; filename=\"luch-ca.crt\"\r" : "")\r
 
                 """
@@ -265,6 +299,7 @@ public final class WebServer: @unchecked Sendable {
                     .trimmingCharacters(in: .whitespaces)
             }
 
+            log("web: request \(requestLine) upgrade=\(headers["upgrade"] ?? "-") key=\(headers["sec-websocket-key"] != nil)")
             if path.hasPrefix("/ws"), headers["upgrade"]?.lowercased().contains("websocket") == true,
                 let key = headers["sec-websocket-key"]
             {

@@ -186,6 +186,41 @@ public final class Discovery {
         }
     }
 
+    /// When each receiver was last seen, so a device that vanished without a goodbye can be dropped.
+    private var seen: [String: Date] = [:]
+    private let seenLock = NSLock()
+
+    private func touch(_ service: String) {
+        seenLock.lock()
+        seen[service] = Date()
+        seenLock.unlock()
+    }
+
+    /// Removes receivers not confirmed for `maxAge` seconds; returns how many went away.
+    @discardableResult
+    public func sweep(maxAge: TimeInterval) -> Int {
+        let now = Date()
+        var gone: [String] = []
+        seenLock.lock()
+        for (service, when) in seen where now.timeIntervalSince(when) > maxAge {
+            gone.append(service)
+        }
+        for service in gone { seen.removeValue(forKey: service) }
+        seenLock.unlock()
+        guard !gone.isEmpty else { return 0 }
+        lock.lock()
+        var removed: [Receiver] = []
+        for service in gone {
+            if let receiver = receivers.removeValue(forKey: service) { removed.append(receiver) }
+        }
+        lock.unlock()
+        for receiver in removed {
+            log("bonjour: stale: \(receiver.name) (\(receiver.address))")
+        }
+        if !removed.isEmpty { onUpdate?() }
+        return removed.count
+    }
+
     fileprivate func handleBrowse(
         flags: DNSServiceFlags, ifIndex: UInt32, error: DNSServiceErrorType,
         name: UnsafePointer<CChar>?
@@ -194,6 +229,7 @@ public final class Discovery {
         let service = String(cString: name)
         log("bonjour: browse event flags=\(flags) \(service) if=\(ifIndex)")
         if flags & kDNSServiceFlagsAdd != 0 {
+            touch(service)
             resolve(service, ifIndex: ifIndex)
         } else {
             lock.lock()
@@ -227,6 +263,7 @@ public final class Discovery {
         host: UnsafePointer<CChar>?, port: UInt16, txtLen: UInt16, txt: UnsafeRawPointer?
     ) {
         guard error == kDNSServiceErr_NoError, let fullname, let host else { return }
+        touch(String(cString: fullname))
         let txt = txtMap(txt, length: txtLen)
         if let v = txt["v"], v != "0" {
             log("bonjour: ignoring \(String(cString: fullname)): protocol v\(v)")
