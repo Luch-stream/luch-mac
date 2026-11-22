@@ -6,6 +6,9 @@ import VideoToolbox
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public enum ReceiveCaps {
     /// A stable id for this Mac, kept next to the sender's own id.
@@ -24,6 +27,9 @@ public enum ReceiveCaps {
     }
 
     public static func model() -> String {
+        #if canImport(UIKit)
+        return "\(UIDevice.current.model) \(UIDevice.current.systemVersion)"
+        #else
         var uts = utsname()
         uname(&uts)
         let machine = withUnsafeBytes(of: &uts.machine) { raw -> String in
@@ -31,12 +37,20 @@ public enum ReceiveCaps {
             return String(decoding: bytes, as: UTF8.self)
         }
         return machine.isEmpty ? "Mac" : machine
+        #endif
     }
 
     /// Screen geometry in pixels, read on the main thread where AppKit wants it.
     public static func screen() -> (width: Int, height: Int, refresh: Int) {
         func read() -> (Int, Int, Int) {
-            #if canImport(AppKit)
+            #if canImport(UIKit)
+            let bounds = UIScreen.main.bounds
+            let scale = UIScreen.main.scale
+            let width = Int((bounds.width * scale).rounded())
+            let height = Int((bounds.height * scale).rounded())
+            let refresh = UIScreen.main.maximumFramesPerSecond
+            return (width, height, refresh > 0 ? refresh : 60)
+            #elseif canImport(AppKit)
             guard let screen = NSScreen.main ?? NSScreen.screens.first else { return (1920, 1080, 60) }
             let scale = screen.backingScaleFactor
             let width = Int((screen.frame.width * scale).rounded())

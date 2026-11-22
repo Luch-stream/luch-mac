@@ -95,6 +95,9 @@ case "stats":
             if (stats["charging"] as? NSNumber)?.boolValue == true { line += "⚡" }
         }
         if let thermal = stats["thermal"] as? String, thermal != "none" { line += " · \(thermal)" }
+        if let headroom = (stats["thermal_headroom"] as? NSNumber)?.doubleValue {
+            line += String(format: headroom < 0.3 ? " · 🔥 %.2f" : " · 🌡%.2f", headroom)
+        }
         print(line)
     }
 

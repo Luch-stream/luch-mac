@@ -40,7 +40,11 @@ public struct ReceiverCaps {
     public var charging = true
     public var thermal = "none"
     public var powerSave = false
+    /// 1 = cool, below ~0.3 means throttling soon; negative when the device cannot tell.
+    public var headroom: Double = -1
 
+    /// Whether the receiver can report heat at all: a thermal status other than "none" or a headroom figure.
+    public var hasThermal: Bool { thermal != "none" || headroom >= 0 }
     /// A phone or tablet running off its own battery.
     public var onBattery: Bool { battery >= 0 && !charging }
     /// none=0, light=1, moderate=2, severe=3, critical=4, and worse.
@@ -84,6 +88,7 @@ public struct ReceiverCaps {
         charging = (device["charging"] as? Bool) ?? true
         thermal = device["thermal"] as? String ?? "none"
         powerSave = (device["power_save"] as? Bool) ?? false
+        headroom = (device["headroom"] as? NSNumber)?.doubleValue ?? -1
 
         var parsed: [String: VideoCapability] = [:]
         for (mime, raw) in (hw["video"] as? [String: Any] ?? [:]) {

@@ -6,10 +6,19 @@ import LuchProto
 import VideoToolbox
 import dnssd
 
+/// Anything that plays the session's audio. Kept out of this module so the receiver builds for
+/// platforms without libopus (the iOS app starts video-only).
+public protocol AudioSink: AnyObject {
+    func start()
+    func stop()
+}
+
 public final class Receiver {
     public let name: String
     public let id: String
     public var accepting = true
+    /// Provided by the app: it decides whether audio is played at all.
+    public var makeAudio: ((Int32) -> AudioSink?)?
 
     /// Called when a session starts or ends, for the window title and the menu.
     public var onSession: ((String?) -> Void)?
@@ -79,7 +88,7 @@ final class ControlServer {
     private var listenFD: Int32 = -1
     private var running = true
     private var session: VideoSession?
-    private var audio: AudioSession?
+    private var audio: AudioSink?
     private var current: Control?
     private var statsThread: Thread?
     private var idleSeconds = 0
@@ -232,8 +241,7 @@ final class ControlServer {
                 control.send(["t": "ready", "video_port": Int(session.videoPort),
                               "audio_port": Int(session.audioPort)])
                 session.start()
-                if session.audioSocket >= 0 {
-                    let audio = AudioSession(fd: session.audioSocket)
+                if session.audioSocket >= 0, let audio = owner?.makeAudio?(session.audioSocket) {
                     audio.start()
                     self.audio = audio
                 }

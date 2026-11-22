@@ -233,11 +233,11 @@ public final class VideoSession {
 }
 
 extension Array where Element == UInt8 {
-    func be16(_ offset: Int) -> UInt16 {
+    public func be16(_ offset: Int) -> UInt16 {
         (UInt16(self[offset]) << 8) | UInt16(self[offset + 1])
     }
 
-    func be32(_ offset: Int) -> UInt32 {
+    public func be32(_ offset: Int) -> UInt32 {
         (UInt32(self[offset]) << 24) | (UInt32(self[offset + 1]) << 16)
             | (UInt32(self[offset + 2]) << 8) | UInt32(self[offset + 3])
     }

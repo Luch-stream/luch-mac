@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import AVFoundation
+import LuchAudio
 import LuchReceive
 
 final class VideoView: NSView, VideoSink {
@@ -67,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         videoView.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
         receiver = Receiver(name: Host.current().localizedName ?? "Mac", sink: videoView)
+        receiver.makeAudio = { AudioSession(fd: $0) }
         receiver.onStats = { [weak self] stats in
             DispatchQueue.main.async {
                 guard let label = self?.statsLabel else { return }

@@ -53,11 +53,14 @@ func parse(_ argv: [String]) -> Args {
         case "--seconds": a.seconds = Double(next()) ?? 0
         case "--display": a.options.display = Int(next())
         case "--fps": a.options.fps = Int(next()) ?? Proto.fps
-        case "--bitrate": a.options.bitrate = Int(next()) ?? Proto.videoKbps
+        case "--bitrate":
+            let value = next()
+            a.options.bitrate = value == "auto" ? 0 : (Int(value) ?? Proto.videoKbps)
         case "--size":
             let parts = next().split(separator: "x")
             a.options.width = Int(parts.first ?? "") ?? Proto.width
             a.options.height = Int(parts.last ?? "") ?? Proto.height
+            a.options.explicitSize = true
         case "--no-audio": a.options.audio = false
         case "--weights":
             let value = next()
@@ -75,8 +78,12 @@ func parse(_ argv: [String]) -> Args {
             a.options.audioFEC = false
         case "--audio-bitrate":
             let value = next()
-            guard let kbps = Int(value), kbps >= 16, kbps <= 512 else { usage() }
-            a.options.audioBitrate = kbps * 1000
+            if value == "auto" {
+                a.options.audioBitrate = 0
+            } else {
+                guard let kbps = Int(value), kbps >= 16, kbps <= 512 else { usage() }
+                a.options.audioBitrate = kbps * 1000
+            }
         case "--preset", "--quality":
             let value = next()
             guard let preset = QualityPreset.parse(value) else { usage() }

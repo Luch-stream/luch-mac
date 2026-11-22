@@ -5,8 +5,9 @@ import AVFoundation
 import COpus
 import Foundation
 import LuchProto
+import LuchReceive
 
-public final class AudioSession {
+public final class AudioSession: AudioSink {
     private let fd: Int32
     private let lock = NSLock()
     private var running = true

@@ -19,6 +19,30 @@ final class Preferences {
         set { defaults.set(newValue, forKey: "bitrate") }
     }
 
+    /// Frame rate the stream is planned for; the heat policy may lower it.
+    var fps: Int {
+        get { (defaults.object(forKey: "fps") as? NSNumber)?.intValue ?? Proto.fps }
+        set { defaults.set(newValue, forKey: "fps") }
+    }
+
+    /// Whether the receiver's heat is watched at all; off also hides the warning.
+    var trackHeat: Bool {
+        get { (defaults.object(forKey: "trackHeat") as? NSNumber)?.boolValue ?? true }
+        set { defaults.set(newValue, forKey: "trackHeat") }
+    }
+
+    /// What to do when the receiver says it is too hot: warn | bitrate | quality | fps | both.
+    var hotPolicy: String {
+        get { defaults.string(forKey: "hotPolicy") ?? "warn" }
+        set { defaults.set(newValue, forKey: "hotPolicy") }
+    }
+
+    /// Put the settings back once the receiver cools down.
+    var restoreWhenCool: Bool {
+        get { (defaults.object(forKey: "restoreWhenCool") as? NSNumber)?.boolValue ?? false }
+        set { defaults.set(newValue, forKey: "restoreWhenCool") }
+    }
+
     var audio: Bool {
         get { (defaults.object(forKey: "audio") as? NSNumber)?.boolValue ?? true }
         set { defaults.set(newValue, forKey: "audio") }
@@ -105,6 +129,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sizeModeOverride: SizeMode?
     private var presetOverride: QualityPreset?
     private var audioBitrateOverride: Int?
+    private var bitrateOverride: Int?
+    private var fpsOverride: Int?
+    /// What the heat policy changed for this session, and what it was before.
+    private var hotPreset: QualityPreset?
+    private var hotBitrate: Int?
+    private var hotFps: Int?
+    private var hotApplied = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logFile = Bundle.main.bundleURL.deletingLastPathComponent()
@@ -220,6 +251,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   "rtt_ms": stats.rttMs, "fps": stats.fps, "mbps": stats.mbps,
                                   "audio": stats.audioPackets]
         if let decode = stats.decodeMs { out["decode_ms"] = decode }
+        if let battery = stats.battery { out["battery"] = battery }
+        if let charging = stats.charging { out["charging"] = charging }
+        if let thermal = stats.thermal { out["thermal"] = thermal }
+        if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat { out["thermal_headroom"] = headroom }
         return out
     }
 
@@ -267,23 +302,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let audio = NSMenuItem(title: "Audio", action: #selector(toggleAudio), keyEquivalent: "")
-        audio.target = self
-        audio.state = Preferences.shared.audio ? .on : .off
-        menu.addItem(audio)
+        // Video ▸ — one level deep: a header, then the choices, no nested menus.
+        func header(_ title: String) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            return item
+        }
 
-        // One row: label, slider, percentage. A bare NSSlider as the item view sits crooked in a menu.
+        let video = NSMenuItem(title: "Video", action: nil, keyEquivalent: "")
+        let videoMenu = NSMenu()
+
+        videoMenu.addItem(header("Quality"))
+        for preset in QualityPreset.allCases {
+            let onBattery = engine?.deviceOnBattery ?? false
+            let hint = onBattery && preset != .low ? " — drains the battery faster" : ""
+            let item = NSMenuItem(title: "   " + preset.label + hint,
+                                  action: #selector(setPreset(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = preset.rawValue
+            item.state = Preferences.shared.preset == preset.rawValue ? .on : .off
+            videoMenu.addItem(item)
+        }
+
+        videoMenu.addItem(.separator())
+        videoMenu.addItem(header("Size"))
+        for mode in SizeMode.allCases {
+            let item = NSMenuItem(title: "   " + mode.rawValue.capitalized,
+                                  action: #selector(setSizeMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = Preferences.shared.sizeMode == mode.rawValue ? .on : .off
+            videoMenu.addItem(item)
+        }
+
+        videoMenu.addItem(.separator())
+        videoMenu.addItem(header("Codec"))
+        for choice in CodecChoice.allCases {
+            let label: String
+            switch choice {
+            case .auto: label = "Auto"
+            case .h264: label = "H.264"
+            case .hevc: label = "HEVC"
+            }
+            let item = NSMenuItem(title: "   " + label, action: #selector(setCodec(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.rawValue
+            item.state = Preferences.shared.codec == choice.rawValue ? .on : .off
+            videoMenu.addItem(item)
+        }
+
+        videoMenu.addItem(.separator())
+        videoMenu.addItem(header("Bitrate"))
+        let videoAuto = NSMenuItem(title: "   Auto", action: #selector(setBitrate(_:)), keyEquivalent: "")
+        videoAuto.target = self
+        videoAuto.representedObject = 0
+        videoAuto.state = Preferences.shared.bitrate == 0 ? .on : .off
+        videoMenu.addItem(videoAuto)
+        for kbps in [10_000, 20_000, 30_000] {
+            let item = NSMenuItem(title: "   \(kbps / 1000) Mbit/s",
+                                  action: #selector(setBitrate(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kbps
+            item.state = Preferences.shared.bitrate == kbps ? .on : .off
+            videoMenu.addItem(item)
+        }
+
+        videoMenu.addItem(.separator())
+        // Same shape as the other groups: a header, then the slider row itself.
+        videoMenu.addItem(header("Warm picture"))
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
-        let label = NSTextField(labelWithString: "Warm")
-        label.font = .menuFont(ofSize: 13)
-        label.frame = NSRect(x: 22, y: 5, width: 44, height: 16)
-        row.addSubview(label)
-
         let slider = NSSlider(value: Preferences.shared.warmth, minValue: 0, maxValue: 1, target: self,
                               action: #selector(warmthChanged(_:)))
         slider.isContinuous = true
         slider.controlSize = .small
-        slider.frame = NSRect(x: 70, y: 4, width: 148, height: 18)
+        slider.frame = NSRect(x: 30, y: 4, width: 186, height: 18)
         row.addSubview(slider)
 
         let percent = NSTextField(labelWithString: String(format: "%d%%", Int((Preferences.shared.warmth * 100).rounded())))
@@ -295,110 +387,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let warmItem = NSMenuItem()
         warmItem.view = row
-        // Tucked into a submenu: the top level stays short, and the row gets the full width it needs.
-        let warmParent = NSMenuItem(title: "Warm picture", action: nil, keyEquivalent: "")
-        let warmMenu = NSMenu()
-        warmMenu.addItem(warmItem)
-        warmParent.submenu = warmMenu
-        menu.addItem(warmParent)
+        videoMenu.addItem(warmItem)
 
-        let quality = NSMenuItem(title: "Quality", action: nil, keyEquivalent: "")
-        let qualityMenu = NSMenu()
-        for preset in QualityPreset.allCases {
-            // Warn about the cost, do not silently change the user's choice.
-            let onBattery = engine?.deviceOnBattery ?? false
-            let hint = onBattery && preset != .low ? " — drains the battery faster" : ""
-            _ = preset
-            let item = NSMenuItem(title: preset.label + hint, action: #selector(setPreset(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = preset.rawValue
-            item.state = Preferences.shared.preset == preset.rawValue ? .on : .off
-            qualityMenu.addItem(item)
-        }
-        quality.submenu = qualityMenu
-        menu.addItem(quality)
-
-        let size = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
-        let sizeMenu = NSMenu()
-        for mode in SizeMode.allCases {
-            let item = NSMenuItem(title: mode.rawValue, action: #selector(setSizeMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode.rawValue
-            item.state = Preferences.shared.sizeMode == mode.rawValue ? .on : .off
-            sizeMenu.addItem(item)
-        }
-        size.submenu = sizeMenu
-        menu.addItem(size)
-
-        let codec = NSMenuItem(title: "Codec", action: nil, keyEquivalent: "")
-        let codecMenu = NSMenu()
-        for choice in CodecChoice.allCases {
-            let item = NSMenuItem(title: choice.rawValue.uppercased(), action: #selector(setCodec(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = choice.rawValue
-            item.state = Preferences.shared.codec == choice.rawValue ? .on : .off
-            codecMenu.addItem(item)
-        }
-        codec.submenu = codecMenu
-        menu.addItem(codec)
-
-        let audioFrames = NSMenuItem(title: "Audio frames", action: nil, keyEquivalent: "")
-        let framesMenu = NSMenu()
-        for ms in [10, 20] {
-            let item = NSMenuItem(title: "\(ms) ms", action: #selector(setAudioFrameMs(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = ms
-            item.state = Preferences.shared.audioFrameMs == ms ? .on : .off
-            framesMenu.addItem(item)
-        }
-        audioFrames.submenu = framesMenu
-        menu.addItem(audioFrames)
-
-        let fec = NSMenuItem(title: "Audio FEC", action: #selector(toggleAudioFEC), keyEquivalent: "")
-        fec.target = self
-        fec.state = Preferences.shared.audioFEC ? .on : .off
-        menu.addItem(fec)
-
-        let audioBitrate = NSMenuItem(title: "Audio bitrate", action: nil, keyEquivalent: "")
-        let audioMenu = NSMenu()
-        for kbps in [64, 96, 128, 192] {
-            let item = NSMenuItem(title: "\(kbps) kbit/s", action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = kbps * 1000
-            item.state = Preferences.shared.audioBitrate == kbps * 1000 ? .on : .off
-            audioMenu.addItem(item)
-        }
-        audioBitrate.submenu = audioMenu
-        menu.addItem(audioBitrate)
-
-        let bitrate = NSMenuItem(title: "Bitrate", action: nil, keyEquivalent: "")
-        let bitrateMenu = NSMenu()
-        for kbps in [10_000, 20_000, 30_000] {
-            let item = NSMenuItem(title: "\(kbps / 1000) Mbit/s", action: #selector(setBitrate(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = kbps
-            item.state = Preferences.shared.bitrate == kbps ? .on : .off
-            bitrateMenu.addItem(item)
-        }
-        bitrate.submenu = bitrateMenu
-        menu.addItem(bitrate)
-
-        let display = NSMenuItem(title: "Display", action: nil, keyEquivalent: "")
-        let displayMenu = NSMenu()
-        let main = NSMenuItem(title: "Main display", action: #selector(setDisplay(_:)), keyEquivalent: "")
+        videoMenu.addItem(.separator())
+        videoMenu.addItem(header("Display"))
+        let main = NSMenuItem(title: "   Main display", action: #selector(setDisplay(_:)), keyEquivalent: "")
         main.target = self
         main.representedObject = -1
         main.state = Preferences.shared.display == nil ? .on : .off
-        displayMenu.addItem(main)
+        videoMenu.addItem(main)
         for (index, screen) in NSScreen.screens.enumerated() {
-            let item = NSMenuItem(title: screen.localizedName, action: #selector(setDisplay(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: "   " + screen.localizedName,
+                                  action: #selector(setDisplay(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = index
             item.state = Preferences.shared.display == index ? .on : .off
-            displayMenu.addItem(item)
+            videoMenu.addItem(item)
         }
-        display.submenu = displayMenu
-        menu.addItem(display)
+
+        video.submenu = videoMenu
+        menu.addItem(video)
+
+        // Audio ▸ — same rule: one level.
+        let audioGroup = NSMenuItem(title: "Audio", action: nil, keyEquivalent: "")
+        let audioGroupMenu = NSMenu()
+
+        let sound = NSMenuItem(title: "Sound", action: #selector(toggleAudio), keyEquivalent: "")
+        sound.target = self
+        sound.state = Preferences.shared.audio ? .on : .off
+        audioGroupMenu.addItem(sound)
+
+        audioGroupMenu.addItem(.separator())
+        audioGroupMenu.addItem(header("Bitrate"))
+        let audioAuto = NSMenuItem(title: "   Auto", action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
+        audioAuto.target = self
+        audioAuto.representedObject = 0
+        audioAuto.state = Preferences.shared.audioBitrate == 0 ? .on : .off
+        audioGroupMenu.addItem(audioAuto)
+        for kbps in [64, 96, 128, 192] {
+            let item = NSMenuItem(title: "   \(kbps) kbit/s",
+                                  action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kbps * 1000
+            item.state = Preferences.shared.audioBitrate == kbps * 1000 ? .on : .off
+            audioGroupMenu.addItem(item)
+        }
+
+        audioGroupMenu.addItem(.separator())
+        audioGroupMenu.addItem(header("Frame size"))
+        for ms in [10, 20] {
+            let item = NSMenuItem(title: "   \(ms) ms", action: #selector(setAudioFrameMs(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = ms
+            item.state = Preferences.shared.audioFrameMs == ms ? .on : .off
+            audioGroupMenu.addItem(item)
+        }
+
+        audioGroupMenu.addItem(.separator())
+        let fec = NSMenuItem(title: "In-band FEC", action: #selector(toggleAudioFEC), keyEquivalent: "")
+        fec.target = self
+        fec.state = Preferences.shared.audioFEC ? .on : .off
+        audioGroupMenu.addItem(fec)
+
+        audioGroup.submenu = audioGroupMenu
+        menu.addItem(audioGroup)
+
+        // Receiver heat ▸
+        let heat = NSMenuItem(title: "Receiver heat", action: nil, keyEquivalent: "")
+        let heatMenu = NSMenu()
+        let auto = NSMenuItem(title: "Track receiver heat: Auto", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
+        auto.target = self
+        auto.representedObject = true
+        auto.state = Preferences.shared.trackHeat ? .on : .off
+        heatMenu.addItem(auto)
+        let off = NSMenuItem(title: "Track receiver heat: Off", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
+        off.target = self
+        off.representedObject = false
+        off.state = Preferences.shared.trackHeat ? .off : .on
+        heatMenu.addItem(off)
+
+        heatMenu.addItem(.separator())
+        for (value, label) in [("warn", "Warn only"), ("bitrate", "Lower bitrate"),
+                               ("quality", "Lower quality"), ("fps", "Lower fps"),
+                               ("both", "Bitrate + fps")] {
+            let item = NSMenuItem(title: "When hot: " + label, action: #selector(setHotPolicy(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            item.state = Preferences.shared.hotPolicy == value ? .on : .off
+            heatMenu.addItem(item)
+        }
+
+        heatMenu.addItem(.separator())
+        let restore = NSMenuItem(title: "Restore quality when cool", action: #selector(toggleRestoreWhenCool), keyEquivalent: "")
+        restore.target = self
+        restore.state = Preferences.shared.restoreWhenCool ? .on : .off
+        heatMenu.addItem(restore)
+
+        heat.submenu = heatMenu
+        menu.addItem(heat)
 
         menu.addItem(.separator())
 
@@ -432,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if stats.charging == true { line += "⚡" }
         }
         if let thermal = stats.thermal, thermal != "none" { line += " · \(thermal)" }
-        if let headroom = stats.thermalHeadroom {
+        if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat {
             // Warn, never throttle on its own: the user decides whether to drop the quality.
             line += headroom < 0.3 ? String(format: " · 🔥 %.2f", headroom)
                                    : String(format: " · 🌡%.2f", headroom)
@@ -441,6 +527,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if line != statsLine {
             statsLine = line
             statsItem?.title = line
+        }
+    }
+
+    // MARK: - receiver heat
+
+    /// The receiver crossed the hot line (or came back). Acts only if the user asked for it, and only
+    /// when the receiver actually has a thermal sensor to trust.
+    private func receiverHot(_ hot: Bool, headroom: Double) {
+        guard Preferences.shared.trackHeat, engine?.caps?.hasThermal == true else { return }
+        if hot {
+            guard !hotApplied, Preferences.shared.hotPolicy != "warn" else { return }
+            hotApplied = true
+            let policy = Preferences.shared.hotPolicy
+            if policy == "bitrate" || policy == "both" {
+                let now = Preferences.shared.bitrate
+                hotBitrate = max(3_000, Int(Double(now) * 0.6 / 1000) * 1000)
+            }
+            if policy == "quality" {
+                hotPreset = Self.stepDown(QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
+            }
+            if policy == "fps" || policy == "both" { hotFps = 30 }
+            state = String(format: "Receiver is hot (%.2f) — applying heat policy", headroom)
+            rebuildMenu()
+            if let receiver = currentReceiver { startMirror(receiver) }
+        } else if hotApplied, Preferences.shared.restoreWhenCool {
+            hotApplied = false
+            hotPreset = nil
+            hotBitrate = nil
+            hotFps = nil
+            state = "Receiver is cool again — settings restored"
+            rebuildMenu()
+            if let receiver = currentReceiver { startMirror(receiver) }
+        }
+    }
+
+    private static func stepDown(_ preset: QualityPreset) -> QualityPreset {
+        switch preset {
+        case .auto, .low: return .low
+        case .balanced: return .low
+        case .high: return .balanced
+        case .max: return .high
         }
     }
 
@@ -500,12 +627,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         stopMirror()
         var options = MirrorOptions()
-        options.bitrate = Preferences.shared.bitrate
+        options.bitrate = bitrateOverride ?? hotBitrate ?? Preferences.shared.bitrate
         options.audio = Preferences.shared.audio
         options.display = Preferences.shared.display
         options.codec = codecOverride ?? (CodecChoice(rawValue: Preferences.shared.codec) ?? .auto)
         options.sizeMode = sizeModeOverride ?? (SizeMode(rawValue: Preferences.shared.sizeMode) ?? .fit)
-        options.preset = presetOverride ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
+        options.preset = presetOverride ?? hotPreset ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
+        options.fps = fpsOverride ?? hotFps ?? Preferences.shared.fps
         options.audioBitrate = audioBitrateOverride ?? Preferences.shared.audioBitrate
         options.audioFrameMs = Preferences.shared.audioFrameMs
         options.audioFEC = Preferences.shared.audioFEC
@@ -515,6 +643,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engine = Engine(options: options)
         engine.onStats = { [weak self] stats in
             DispatchQueue.main.async { self?.apply(stats) }
+        }
+        engine.onHot = { [weak self] hot, headroom in
+            DispatchQueue.main.async { self?.receiverHot(hot, headroom: headroom) }
         }
         engine.onStopped = { [weak self] reason in
             DispatchQueue.main.async {
@@ -559,7 +690,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if stats.charging == true { line += "⚡" }
         }
         if let thermal = stats.thermal, thermal != "none" { line += " · \(thermal)" }
-        if let headroom = stats.thermalHeadroom {
+        if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat {
             // Warn, never throttle on its own: the user decides whether to drop the quality.
             line += headroom < 0.3 ? String(format: " · 🔥 %.2f", headroom)
                                    : String(format: " · 🌡%.2f", headroom)
@@ -605,6 +736,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         log("app: menu audio frame -> \(ms) ms")
         Preferences.shared.audioFrameMs = ms
         restartIfStreaming()
+    }
+
+    @objc private func setTrackHeat(_ sender: NSMenuItem) {
+        guard let on = sender.representedObject as? Bool else { return }
+        Preferences.shared.trackHeat = on
+        rebuildMenu()
+    }
+
+    @objc private func setHotPolicy(_ sender: NSMenuItem) {
+        guard let policy = sender.representedObject as? String else { return }
+        Preferences.shared.hotPolicy = policy
+        rebuildMenu()
+    }
+
+    @objc private func toggleRestoreWhenCool() {
+        Preferences.shared.restoreWhenCool.toggle()
+        rebuildMenu()
     }
 
     @objc private func toggleAudioFEC() {

@@ -1,17 +1,42 @@
+From 1bbf04b578ea61f8efab3d75a57d6e71df8d21b1 Mon Sep 17 00:00:00 2001
+From: DeepSeek + powertux <iqqator@altlinux.space>
+Date: Sun, 22 Nov 2026 03:31:19 +0300
+Subject: [PATCH] receiver: device state in stats, heat warning, fastest
+ display mode
+
+The receiver now tells the sender what it is: battery, charging, thermal status and headroom, power saving and interactivity, sent only when they change. A hot device is announced once per episode (0.3 down, 0.4 up), so the sender can warn or lower the quality instead of guessing.
+
+The screen asks the panel for its highest refresh rate in the native width, which removes up to a frame period of added latency, and shows a heat badge while the device is close to throttling.
+
+The screen is reused with SINGLE_TOP, so a codec or quality change no longer tears down the session that just started, and the stats carry audio latency and video hold time from upstream.
+---
+ PROTOCOL.md                                   |  19 +-
+ .../src/main/java/ru/toxblh/luch/Bench.java   |  29 ++-
+ .../src/main/java/ru/toxblh/luch/Caps.java    |  23 ++
+ .../main/java/ru/toxblh/luch/DeviceState.java | 239 ++++++++++++++++++
+ .../ru/toxblh/luch/LowLatencyDecoder.java     |   3 +
+ .../main/java/ru/toxblh/luch/LuchService.java |   3 +
+ .../java/ru/toxblh/luch/MirrorActivity.java   | 145 ++++++++++-
+ .../java/ru/toxblh/luch/MirrorSession.java    |  63 ++++-
+ .../app/src/main/res/values-ru/strings.xml    |   1 +
+ android/app/src/main/res/values/strings.xml   |   1 +
+ 10 files changed, 493 insertions(+), 33 deletions(-)
+ create mode 100644 android/app/src/main/java/ru/toxblh/luch/DeviceState.java
+
 diff --git a/PROTOCOL.md b/PROTOCOL.md
-index 2e41027..80d8eeb 100644
+index ae69626..b0b2be9 100644
 --- a/PROTOCOL.md
 +++ b/PROTOCOL.md
-@@ -56,6 +56,8 @@ receiver → {"t":"ready","video_port":P,"audio_port":Q}      or {"t":"error","c
- receiver → {"t":"keyframe"}                                 an IDR is needed (start, or after a loss)
- either   → {"t":"stop"} / receiver → {"t":"stop","by":"receiver"}   (Back on the remote)
- receiver → {"t":"stats","decode_ms":..,"host_ms":..,"fps":..,"lost":..,"dropped":..,"shown_seq":N,"decoder":".."}
+@@ -57,6 +57,8 @@ receiver → {"t":"keyframe"}                                 an IDR is needed (
+ either   → {"t":"stop"} / receiver → {"t":"stop","by":"receiver","reason":"back"|"screen_closed"|"screen_not_shown"}
+ receiver → {"t":"stats","decode_ms":..,"host_ms":..,"fps":..,"lost":..,"dropped":..,"shown_seq":N,"decoder":"..",
+             "audio_latency_ms":N,"video_hold_ms":N}
 +           may also carry "battery" (percent), "charging", "thermal"
 +           ("none|light|moderate|severe|critical|emergency|shutdown"), "power_save", "interactive"
  sender   → {"t":"sender_stats","rtt_ms":..,"host_ms":..,"fps":..,"mbps":..,"encoder":"..","res":"WxH"}
  ```
  
-@@ -92,10 +94,23 @@ again, and again after about RTT + 100 ms if none comes. Of the frames decoded a
+@@ -106,10 +108,23 @@ again, and again after about RTT + 100 ms if none comes. Of the frames decoded a
  
  - `hw`: read from the hardware, instant. `video`: per MIME type with a hardware decoder, `decoder`, `max` (WxH),
    `1080p60`, `1080p120`, `2160p30`, `2160p60`, `10bit`, `low_latency` (booleans). `audio`: MIME types with any
@@ -37,21 +62,8 @@ index 2e41027..80d8eeb 100644
  
  The receiver measures by itself after install, an app update or a firmware update, and at a sender's first hello
  when there is no result yet, but only while nothing plays (a video would lose its decoder); then it sends
-diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 396bc86..6a21206 100644
---- a/android/app/build.gradle
-+++ b/android/app/build.gradle
-@@ -19,7 +19,7 @@ android {
-         applicationId 'ru.toxblh.luch'
-         minSdk 26
-         targetSdk 34
--        versionCode 2
-+        versionCode 3
-         versionName '0.2'
-     }
- 
 diff --git a/android/app/src/main/java/ru/toxblh/luch/Bench.java b/android/app/src/main/java/ru/toxblh/luch/Bench.java
-index 7e48473..c3d725d 100644
+index e4072f6..e512fc9 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/Bench.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/Bench.java
 @@ -41,8 +41,19 @@ final class Bench {
@@ -76,7 +88,7 @@ index 7e48473..c3d725d 100644
      private static final int W = 1920, H = 1080, FPS = 60;
      /** The first frames include the decoder warming up; they are not counted. */
      private static final int WARMUP = 5;
-@@ -101,7 +112,7 @@ final class Bench {
+@@ -106,7 +117,7 @@ final class Bench {
          try {
              JSONObject result = new JSONObject();
              String best = null;
@@ -85,7 +97,7 @@ index 7e48473..c3d725d 100644
              for (String[] clip : CLIPS) {
                  String mime = clip[0];
                  if (LowLatencyDecoder.hardwareDecoder(mime) == null) continue;
-@@ -112,18 +123,22 @@ final class Bench {
+@@ -117,18 +128,22 @@ final class Bench {
                      Log.w(LuchService.TAG, "bench " + mime, e);
                      r = new JSONObject().put("error", String.valueOf(e));
                  }
@@ -113,7 +125,7 @@ index 7e48473..c3d725d 100644
              result.put("key", key(context));
              prefs(context).edit().putString("bench", result.toString()).apply();
 diff --git a/android/app/src/main/java/ru/toxblh/luch/Caps.java b/android/app/src/main/java/ru/toxblh/luch/Caps.java
-index 0d94a5a..44bc577 100644
+index c46862d..a39e111 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/Caps.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/Caps.java
 @@ -1,12 +1,15 @@
@@ -140,7 +152,7 @@ index 0d94a5a..44bc577 100644
          } catch (JSONException ignored) {
          }
          return out;
-@@ -96,6 +100,14 @@ final class Caps {
+@@ -122,6 +126,14 @@ final class Caps {
          return new JSONArray(types);
      }
  
@@ -154,9 +166,9 @@ index 0d94a5a..44bc577 100644
 +
      private static JSONObject display(Context context) throws JSONException {
          JSONObject out = new JSONObject();
-         Display d = context.getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
-@@ -105,6 +117,17 @@ final class Caps {
-             modes.put(m.getPhysicalWidth() + "x" + m.getPhysicalHeight() + "@" + Math.round(m.getRefreshRate()));
+         Display d = Compat.service(context, DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+@@ -138,6 +150,17 @@ final class Caps {
+             modes.put(Math.max(size.x, size.y) + "x" + Math.min(size.x, size.y) + "@" + Math.round(d.getRefreshRate()));
          }
          out.put("modes", modes);
 +        // What the client would render into right now: mode with the rotation applied, and the rate.
@@ -171,8 +183,8 @@ index 0d94a5a..44bc577 100644
 +        out.put("refresh", Math.round(d.getRefreshRate()));
 +        out.put("type", deviceType(context));
          JSONArray hdr = new JSONArray();
-         Display.HdrCapabilities h = d.getHdrCapabilities();
-         if (h != null) {
+         Display.HdrCapabilities h = Build.VERSION.SDK_INT >= 24 ? d.getHdrCapabilities() : null;
+         if (h != null && Build.VERSION.SDK_INT >= 24) {
 diff --git a/android/app/src/main/java/ru/toxblh/luch/DeviceState.java b/android/app/src/main/java/ru/toxblh/luch/DeviceState.java
 new file mode 100644
 index 0000000..76e353c
@@ -419,7 +431,7 @@ index 0000000..76e353c
 +    }
 +}
 diff --git a/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java b/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
-index f87a38f..6004752 100644
+index 274790c..699c841 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/LowLatencyDecoder.java
 @@ -47,6 +47,7 @@ final class LowLatencyDecoder {
@@ -430,7 +442,7 @@ index f87a38f..6004752 100644
          List<String> supportedVendor = null;
          if (Build.VERSION.SDK_INT >= 31) {
              try {
-@@ -67,6 +68,8 @@ final class LowLatencyDecoder {
+@@ -70,6 +71,8 @@ final class LowLatencyDecoder {
                  if (k.equals("priority")) {
                      if (qualcomm || operatingRate) f.setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE);
                      if (!qualcomm) f.setInteger(MediaFormat.KEY_PRIORITY, 0);
@@ -440,7 +452,7 @@ index f87a38f..6004752 100644
                      f.setInteger(k, 1);
                  }
 diff --git a/android/app/src/main/java/ru/toxblh/luch/LuchService.java b/android/app/src/main/java/ru/toxblh/luch/LuchService.java
-index 4d93e75..a2c1a6d 100644
+index d949666..c8423cb 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/LuchService.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/LuchService.java
 @@ -45,6 +45,8 @@ public class LuchService extends Service {
@@ -450,9 +462,9 @@ index 4d93e75..a2c1a6d 100644
 +        // Battery, charging and thermal: cached from system callbacks, reported only on change.
 +        DeviceState.attach(this);
          goForeground();
-         nsd = getSystemService(NsdManager.class);
+         nsd = Compat.service(this, NsdManager.class);
          server = new ControlServer(this);
-@@ -75,6 +77,7 @@ public class LuchService extends Service {
+@@ -76,6 +78,7 @@ public class LuchService extends Service {
          } catch (RuntimeException ignored) {
          }
          if (server != null) server.stop();
@@ -461,7 +473,7 @@ index 4d93e75..a2c1a6d 100644
      }
  
 diff --git a/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java b/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
-index 0b72489..03fc1ac 100644
+index f11b2c7..8f1c219 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/MirrorActivity.java
 @@ -3,6 +3,9 @@ package ru.toxblh.luch;
@@ -482,7 +494,7 @@ index 0b72489..03fc1ac 100644
 +
  /**
   * The picture of a mirroring session: a full-screen SurfaceView (not a TextureView: one copy and one frame less),
-  * Wi-Fi held in low-latency mode while it is up. Back, Home or another app on top ends the session.
+  * Wi-Fi held in low-latency mode while it is up. Back ends the session; Home or another app on top only mutes it (Android 8+).
   */
  public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
      private static volatile MirrorActivity shown;
@@ -496,8 +508,8 @@ index 0b72489..03fc1ac 100644
      private WifiManager.WifiLock wifiLock;
      private TextView stats;
      private boolean statsOn;
-@@ -33,11 +45,13 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
-         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+@@ -41,11 +53,13 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         }
          // Ask the display for its game mode: the least picture processing, the least delay (Moonlight does the same).
          if (Build.VERSION.SDK_INT >= 30) getWindow().setPreferMinimalPostProcessing(true);
 -        SurfaceView view = new SurfaceView(this);
@@ -514,7 +526,7 @@ index 0b72489..03fc1ac 100644
          // Moonlight-style statistics in the corner, toggled with OK (or Info / Menu) and remembered.
          stats = new TextView(this);
          stats.setTypeface(Typeface.MONOSPACE);
-@@ -57,7 +71,24 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+@@ -65,7 +79,24 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
          getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                  | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
          shown = this;
@@ -540,8 +552,8 @@ index 0b72489..03fc1ac 100644
      }
  
      @Override
-@@ -79,15 +110,71 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
-         super.onPause();
+@@ -114,6 +145,35 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         super.onStop();
      }
  
 +    /** Ask the panel for its highest refresh rate: the display adds up to a frame period on top of decode. */
@@ -573,17 +585,12 @@ index 0b72489..03fc1ac 100644
 +        badge.post(() -> badge.setVisibility(hot ? View.VISIBLE : View.GONE));
 +    }
 +
-     /** Leaving the screen in any way ends the session, so the sender stops capturing. */
-     @Override
-     protected void onStop() {
-         android.util.Log.i(LuchService.TAG, "mirror screen stopped, finishing=" + isFinishing());
--        MirrorSession s = MirrorSession.current;
--        if (s != null && !s.ended()) s.stopByUser();
-+        // Only the session this screen was showing: a rebuilt screen must not kill its successor.
-+        MirrorSession s = session;
-+        if (s != null && !s.ended() && s == MirrorSession.current) s.stopByUser();
-         super.onStop();
-     }
+     /** How long a stopped screen may take to come back before the session counts as closed. */
+     private static final long STOP_GRACE_MS = 1_000;
+     private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+@@ -125,6 +185,32 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         if (!isFinishing()) finish();
+     };
  
 +    @Override
 +    protected void onNewIntent(Intent intent) {
@@ -613,8 +620,8 @@ index 0b72489..03fc1ac 100644
 +
      @Override
      protected void onDestroy() {
-         if (shown == this) shown = null;
-@@ -131,27 +218,62 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
+         handler.removeCallbacks(closeIfStillStopped);
+@@ -188,27 +274,62 @@ public class MirrorActivity extends Activity implements SurfaceHolder.Callback {
          if (a != null) a.runOnUiThread(a::finish);
      }
  
@@ -685,35 +692,20 @@ index 0b72489..03fc1ac 100644
      }
  }
 diff --git a/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java b/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
-index ebc5d15..359cb80 100644
+index 434d546..5de8c3f 100644
 --- a/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
 +++ b/android/app/src/main/java/ru/toxblh/luch/MirrorSession.java
-@@ -107,16 +107,21 @@ final class MirrorSession {
-     /** Opens both sockets and the screen; returns {video port, audio port}. */
-     static synchronized int[] start(Context context, Control control, JSONObject msg) throws IOException {
-         MirrorSession old = current;
--        if (old != null) old.end(false);
+@@ -143,6 +143,8 @@ final class MirrorSession {
          MirrorSession s = new MirrorSession(context, control, msg);
          s.videoSocket = openSocket();
          s.audioSocket = openSocket();
 +        // The new session becomes current before the old one ends, so ending it knows it was replaced
 +        // and leaves the screen (and its Surface) alone: a codec switch must not restart the activity.
          current = s;
-         thread(s::videoLoop, "luch-video");
-         if (s.audioRate > 0) thread(s::audioLoop, "luch-audio");
-         thread(s::statsLoop, "luch-stats");
-+        if (old != null) old.end(false);
-+        // SINGLE_TOP + CLEAR_TOP reuse the existing screen (onNewIntent) instead of recreating it,
-+        // so switching codec or quality does not tear down the session that just started.
-         context.startActivity(new Intent(context, MirrorActivity.class)
--                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
-+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
-+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP));
-         return new int[]{s.videoSocket.getLocalPort(), s.audioSocket.getLocalPort()};
-     }
- 
-@@ -157,6 +162,14 @@ final class MirrorSession {
-         return fps;
+         broadcast(context, true, false);
+         wakeScreen(context);
+@@ -244,6 +246,14 @@ final class MirrorSession {
+         context.sendBroadcast(new Intent(ACTION_STATE).putExtra("active", active).putExtra("away", away));
      }
  
 +    int width() {
@@ -725,9 +717,9 @@ index ebc5d15..359cb80 100644
 +    }
 +
      void setSurface(Surface s) {
-         synchronized (surfaceLock) {
-             surface = s;
-@@ -506,20 +519,34 @@ final class MirrorSession {
+         if (s == null && canStayAway() && !ended) s = standIn();
+         Surface old;
+@@ -688,26 +698,41 @@ final class MirrorSession {
          JSONObject s = senderStats;
          double rtt = s == null ? 0 : s.optDouble("rtt_ms", 0);
          double host = s != null && s.has("host_ms") ? s.optDouble("host_ms", hostMs) : hostMs;
@@ -770,7 +762,15 @@ index ebc5d15..359cb80 100644
          return b.toString();
      }
  
-@@ -540,14 +567,26 @@ final class MirrorSession {
+     private static void showScreen(Context context) {
+         context.startActivity(new Intent(context, MirrorActivity.class)
+-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
++                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
++                        | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+     }
+ 
+     /** Seconds to keep asking for the screen; then the session ends, reason "screen_not_shown". */
+@@ -747,7 +772,7 @@ final class MirrorSession {
              MirrorActivity.showStats(overlay(decodeMs, hostMs, count, bytes * 8 / 1e6));
              if (count == 0) continue;
              try {
@@ -779,11 +779,12 @@ index ebc5d15..359cb80 100644
                          .put("decode_ms", Math.round(sum / (double) count / 100.0) / 10.0)
                          .put("host_ms", hc == 0 ? 0 : Math.round(hs / (double) hc) / 10.0)
                          .put("fps", count)
-                         .put("lost", framesLost)
-                         .put("dropped", framesDropped)
+@@ -756,7 +781,19 @@ final class MirrorSession {
                          .put("shown_seq", shownSeq)
--                        .put("decoder", decoderName));
-+                        .put("decoder", decoderName);
+                         .put("decoder", decoderName)
+                         .put("audio_latency_ms", audioLatencyMs)
+-                        .put("video_hold_ms", videoHoldNs / 1_000_000));
++                        .put("video_hold_ms", videoHoldNs / 1_000_000);
 +                // Thermal headroom falls before the status does, so a sender can warn early.
 +                double headroom = DeviceState.headroom(context);
 +                if (headroom >= 0) s.put("thermal_headroom", Math.round(headroom * 100) / 100.0);
@@ -799,41 +800,44 @@ index ebc5d15..359cb80 100644
              } catch (JSONException ignored) {
              }
          }
-@@ -558,6 +597,7 @@ final class MirrorSession {
+@@ -768,6 +805,7 @@ final class MirrorSession {
              if (ended) return;
              ended = true;
          }
 +        boolean replaced = MirrorSession.current != null && MirrorSession.current != this;
-         if (byUser) {
+         if (byReceiver != null) {
              try {
-                 control.send(new JSONObject().put("t", "stop").put("by", "receiver"));
-@@ -579,7 +619,8 @@ final class MirrorSession {
-         }
-         Log.i(LuchService.TAG, "mirror ended" + (byUser ? " by user" : "") + ": in=" + framesIn + " rendered="
+                 control.send(new JSONObject().put("t", "stop").put("by", "receiver").put("reason", byReceiver));
+@@ -790,7 +828,8 @@ final class MirrorSession {
+         Log.i(LuchService.TAG, "mirror ended" + (byReceiver != null ? " here (" + byReceiver + ")" : "") + ": in=" + framesIn + " rendered="
                  + framesRendered + " dropped=" + framesDropped + " lost=" + framesLost + " decoder=" + decoderName);
+         broadcast(context, false, false);
 -        MirrorActivity.sessionEnded();
 +        // Only close the screen when nothing newer took over: on a codec switch the picture stays up.
 +        if (!replaced) MirrorActivity.sessionEnded();
      }
  
-     private void send(String type) {
+     /** Keeps a report of a failure the person will have noticed, with what the session was doing (Reports). */
 diff --git a/android/app/src/main/res/values-ru/strings.xml b/android/app/src/main/res/values-ru/strings.xml
-index d9a63cd..406e4e6 100644
+index 5425f53..fb75cd5 100644
 --- a/android/app/src/main/res/values-ru/strings.xml
 +++ b/android/app/src/main/res/values-ru/strings.xml
-@@ -6,4 +6,5 @@
-     <string name="status_address">Адрес: %1$s, порт %2$d</string>
-     <string name="status_connected">Подключены</string>
-     <string name="status_nearby">Рядом в сети</string>
+@@ -12,4 +12,5 @@
+     <string name="update_to">Обновить до %s</string>
+     <string name="update_installing">Обновление…</string>
+     <string name="update_allow">Чтобы обновиться, разрешите Luch устанавливать приложения: Настройки → Приложения → Специальный доступ → Установка неизвестных приложений.</string>
 +    <string name="hot_badge">🔥 горячо — снизьте качество</string>
  </resources>
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 8055b9f..94fb97d 100644
+index 15635a9..d2d21ad 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -7,4 +7,5 @@
-     <string name="status_address">Address: %1$s, port %2$d</string>
-     <string name="status_connected">Connected senders</string>
-     <string name="status_nearby">Senders nearby</string>
+@@ -13,4 +13,5 @@
+     <string name="update_to">Update to %s</string>
+     <string name="update_installing">Updating…</string>
+     <string name="update_allow">To update, allow Luch to install apps: Settings → Apps → Special app access → Install unknown apps.</string>
 +    <string name="hot_badge">🔥 hot — lower the quality</string>
  </resources>
+-- 
+2.54.0 (Apple Git-157)
+

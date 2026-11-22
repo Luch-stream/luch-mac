@@ -15,6 +15,24 @@ public enum CodecChoice: String, CaseIterable {
 
 /// A quality preset bundles the stream height (and, later, bitrate and fps) under one name.
 /// The size mode picks the aspect ratio; the preset picks how many pixels that aspect gets.
+/// A bitrate computed from the stream itself, for "Auto" in the menu: bits per pixel per second
+/// for video (screen content, not camera) and a per-channel figure for Opus.
+public enum AutoBitrate {
+    public static func videoKbps(width: Int, height: Int, fps: Int, codec: VideoCodec) -> Int {
+        // HEVC reaches the same quality with roughly a quarter fewer bits than H.264.
+        let bpp = codec == .hevc ? 0.10 : 0.13
+        let raw = Double(width * height * fps) * bpp / 1_000_000
+        let clamped = min(60.0, max(3.0, raw))
+        return Int((clamped * 2).rounded() / 2 * 1000)
+    }
+
+    public static func audioBps(channels: Int, frameMs: Int) -> Int {
+        // 96 kbit/s for stereo is transparent for desktop audio; shorter frames cost a little more.
+        let base = 48_000.0 * Double(max(1, channels))
+        return Int(base * (frameMs <= 10 ? 1.15 : 1.0))
+    }
+}
+
 public enum QualityPreset: String, CaseIterable {
     /// Whatever the client itself reports as its render size.
     case auto, low, balanced, high, max
@@ -198,6 +216,10 @@ public final class Engine {
     /// 0 = untouched, 1 = strong night mode.
     public var warmth: Double = 0
     public var onStats: ((SessionStats) -> Void)?
+    /// The receiver crossed the "too hot" line (true) or came back (false), with its thermal headroom.
+    public var onHot: ((Bool, Double) -> Void)?
+    /// What the receiver said it is, kept so the app can ask about its sensors.
+    public private(set) var caps: ReceiverCaps?
     /// The session ended on its own (receiver bye, capture error, socket loss).
     public var onStopped: ((String) -> Void)?
     public private(set) var receiver: Receiver?
@@ -225,6 +247,7 @@ public final class Engine {
     private var deviceCharging: Bool?
     private var deviceThermal: String?
     private var deviceHeadroom: Double?
+    private var lastHot = false
     private var lastFrames: UInt64 = 0
     private var lastBytes: UInt64 = 0
     private var lastLatency: UInt64 = 0
@@ -253,6 +276,7 @@ public final class Engine {
                   "app": Proto.app, "want": ["mirror"]])
         guard let welcome = ctl.waitFor("welcome", timeout: 5) else { throw EngineError.noWelcome }
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
+        self.caps = caps
         log(caps.describe())
         let plan = CodecPlanner.plan(caps: caps, receiverID: r.id, options: options)
         self.plan = plan
@@ -288,15 +312,21 @@ public final class Engine {
             log("audio: receiver gave no audio port, continuing without sound")
         }
 
+        let kbps = options.bitrate > 0 ? options.bitrate
+            : AutoBitrate.videoKbps(width: plan.width, height: plan.height, fps: plan.fps, codec: plan.codec)
+        if options.bitrate == 0 { log("video: auto bitrate \(kbps) kbit/s") }
         guard let encoder = VideoEncoder(codec: plan.codec, width: plan.width, height: plan.height,
-                                         fps: plan.fps, kbps: options.bitrate, profile: options.profile) else {
+                                         fps: plan.fps, kbps: kbps, profile: options.profile) else {
             throw EngineError.encoder
         }
         self.encoder = encoder
         wireVideo(encoder)
 
         if audioTx != nil {
-            audio = OpusAudio(bitrate: options.audioBitrate, frameMs: options.audioFrameMs,
+            let audioBps = options.audioBitrate > 0 ? options.audioBitrate
+                : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
+            if options.audioBitrate == 0 { log("audio: auto bitrate \(audioBps / 1000) kbit/s") }
+            audio = OpusAudio(bitrate: audioBps, frameMs: options.audioFrameMs,
                               fec: options.audioFEC)
             wireAudio()
         }
@@ -448,6 +478,11 @@ public final class Engine {
             if let charging = msg["charging"] as? NSNumber { deviceCharging = charging.boolValue }
             if let thermal = msg["thermal"] as? String { deviceThermal = thermal }
             if let headroom = (msg["thermal_headroom"] as? NSNumber)?.doubleValue { deviceHeadroom = headroom }
+            // Sent only when the state flips, so this fires once per episode, not every second.
+            if let hot = (msg["hot"] as? NSNumber)?.boolValue, hot != lastHot {
+                lastHot = hot
+                onHot?(hot, deviceHeadroom ?? -1)
+            }
         case "error":
             log("<- error: \(msg)")
         case "stop", "bye":
