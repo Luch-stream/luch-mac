@@ -557,10 +557,12 @@ public final class Engine: @unchecked Sendable {
             ? options.bitrate
             : AutoBitrate.videoKbps(width: plan.width, height: plan.height, fps: plan.fps, codec: plan.codec)
         if options.bitrate == 0 { log("video: auto bitrate \(kbps) kbit/s") }
+        // Baseline has no B-frames, so a plain fragmented MP4 without composition offsets decodes in
+        // every browser; the desktop receivers get whatever profile the user chose.
         guard
             let encoder = VideoEncoder(
                 codec: plan.codec, width: plan.width, height: plan.height,
-                fps: plan.fps, kbps: kbps, profile: options.profile)
+                fps: plan.fps, kbps: kbps, profile: .baseline)
         else {
             throw EngineError.encoder
         }

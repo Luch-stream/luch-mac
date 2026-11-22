@@ -21,6 +21,11 @@ video{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;backgro
 'use strict';
 var $ = function (id) { return document.getElementById(id); };
 var ws = null, started = false, stopping = false;
+function fail(why) {
+    $('msg').style.display = 'flex';
+    $('hint').textContent = String(why).slice(0, 200);
+}
+window.onerror = function (message) { fail(message); };
 var sps = null, pps = null, initDone = false, mime = null;
 var ms = null, sb = null, queue = [];
 var timescale = 90000;
@@ -31,6 +36,7 @@ function u8(n) { return [n & 0xff]; }
 function u16(n) { return [(n >> 8) & 0xff, n & 0xff]; }
 function u32(n) { return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]; }
 function u64(n) { return u32(Math.floor(n / 4294967296)).concat(u32(n >>> 0)); }
+function zeros(n) { var a = []; for (var i = 0; i < n; i++) a.push(0); return a; }
 function str(s) { var o = []; for (var i = 0; i < s.length; i++) o.push(s.charCodeAt(i)); return o; }
 function box(type, parts) {
     var body = [].concat.apply([], parts);
@@ -96,7 +102,7 @@ function initSegment(width, height) {
         u16(0), u16(0), u32(0), u32(0), u32(0),
         u16(width), u16(height),
         u32(0x00480000), u32(0x00480000), u32(0), u16(1),
-        new Array(32).fill(0), u16(0x0018), u16(0xffff)
+        zeros(32), u16(0x0018), u16(0xffff)
     ];
     var avc1 = box('avc1', entry.concat([avcC()]));
     var stsd = fullbox('stsd', 0, 0, [u32(1), avc1]);
@@ -122,35 +128,132 @@ function fragment(pts90, duration, sample) {
     return new Uint8Array(moof.concat(mdat));
 }
 
-// ---- the stream ------------------------------------------------------------------------------
-function setStreaming(on) {
-    $('msg').style.display = on ? 'none' : 'flex';
+// ---- the channel -----------------------------------------------------------------------------
+// Over plain HTTP the page seals every message itself: the code shown here is stretched into an
+// AES-GCM key that the sender derives from the same code once the person there agrees.
+var encMode = false, key = null, sendCtr = 0, recvCtr = 0, salt = null, pairCode = '';
+var inbox = Promise.resolve();
+
+function enqueue(task) {
+    inbox = inbox.then(task).catch(function (e) { fail(e && e.message ? e.message : e); });
 }
+function b64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+}
+function unb64(text) {
+    var bin = atob(text), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+function rand(n) {
+    var a = new Uint8Array(n);
+    crypto.getRandomValues(a);
+    return a;
+}
+function deriveKey(code, saltBytes) {
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']).then(function (base) {
+        return crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' },
+            base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    });
+}
+function seal(bytes) {
+    var nonce = new Uint8Array(12), view = new DataView(nonce.buffer);
+    nonce.set(rand(4), 0);
+    view.setUint32(4, Math.floor(sendCtr / 4294967296));
+    view.setUint32(8, sendCtr >>> 0);
+    sendCtr++;
+    return crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, bytes).then(function (ct) {
+        var out = new Uint8Array(12 + ct.byteLength);
+        out.set(nonce, 0);
+        out.set(new Uint8Array(ct), 12);
+        return out;
+    });
+}
+function open_(bytes) {
+    if (bytes.length < 28) return Promise.reject(new Error('короткое сообщение'));
+    var nonce = bytes.subarray(0, 12);
+    var view = new DataView(nonce.buffer, nonce.byteOffset, 12);
+    var value = view.getUint32(8) + view.getUint32(4) * 4294967296;
+    if (value <= recvCtr) return Promise.reject(new Error('повтор пакета'));
+    recvCtr = value;
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, bytes.subarray(12)).then(function (pt) {
+        return new Uint8Array(pt);
+    });
+}
+
+function send(obj) {
+    if (!ws || ws.readyState !== 1) return;
+    if (!key) { ws.send(JSON.stringify(obj)); return; }
+    var text = JSON.stringify(obj);
+    seal(new TextEncoder().encode(text)).then(function (sealed) {
+        if (ws.readyState === 1) ws.send(JSON.stringify({ d: b64(sealed) }));
+    });
+}
+
 function start() {
     stopping = false;
     setStreaming(false);
     $('hint').textContent = 'Подключение…';
-    var secure = location.protocol === 'https:';
-    ws = new WebSocket((secure ? 'wss://' : 'ws://') + location.host + '/ws');
+    encMode = location.protocol === 'http:';
+    if (encMode && !(window.crypto && crypto.subtle)) {
+        fail('Нужен WebCrypto: откройте страницу по HTTPS');
+        return;
+    }
+    ws = new WebSocket((encMode ? 'ws://' : 'wss://') + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
     ws.onopen = function () {
-        send({
+        var hello = {
             t: 'hello', v: 0, name: 'Web', model: 'TV',
             display: { width: screen.width, height: screen.height }, mode: 'none'
-        });
+        };
+        if (encMode) {
+            salt = rand(16);
+            pairCode = String(100000 + Math.floor(Math.random() * 900000));
+            $('hint').textContent = 'Код для подключения: ' + pairCode + ' — подтвердите на компьютере';
+            hello.enc = 'aes-gcm';
+            hello.salt = b64(salt);
+            hello.code = pairCode;
+        }
+        send(hello);
     };
     ws.onmessage = function (e) {
-        if (typeof e.data === 'string') onControl(JSON.parse(e.data));
-        else onMedia(new Uint8Array(e.data));
+        if (typeof e.data === 'string') {
+            var msg;
+            try { msg = JSON.parse(e.data); } catch (err) { return; }
+            if (msg.t === 'ok') {
+                deriveKey(pairCode, salt).then(function (k) {
+                    key = k;
+                    $('hint').textContent = 'Канал шифруется — ждём запуск трансляции';
+                }).catch(function (err) { fail('Ключ: ' + err.message); });
+                return;
+            }
+            if (msg.t === 'deny') { fail('Компьютер отклонил подключение'); ws.close(); return; }
+            if (msg.d) {
+                enqueue(function () {
+                    return open_(unb64(msg.d)).then(function (pt) {
+                        onControl(JSON.parse(new TextDecoder().decode(pt)));
+                    });
+                });
+                return;
+            }
+            onControl(msg);
+            return;
+        }
+        var bytes = new Uint8Array(e.data);
+        if (!key) { onMedia(bytes); return; }
+        enqueue(function () { return open_(bytes).then(onMedia); });
     };
     ws.onclose = function () {
         if (stopping) return;
         $('msg').style.display = 'flex';
         $('go').textContent = 'Смотреть';
-        $('hint').textContent = 'Связь потеряна';
+        if ($('hint').textContent.indexOf('Код') !== 0) $('hint').textContent = 'Связь потеряна';
     };
 }
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 
 function onControl(m) {
     if (m.t === 'start') {
@@ -173,7 +276,7 @@ function onMedia(b) {
     if (b.length < 24) return;
     var view = new DataView(b.buffer, b.byteOffset, b.byteLength);
     var kind = b[0], flags = b[1];
-    var pts = view.getUint32(12) * 1000;      // header carries microseconds
+    var pts = view.getUint32(12) * 1000;      // the header carries microseconds
     var len = view.getUint32(16);
     var data = b.subarray(24, 24 + len);
     if (kind !== 1) return;
@@ -201,27 +304,28 @@ function onMedia(b) {
 }
 
 function buildSource() {
+    if (!window.MediaSource || !MediaSource.isTypeSupported || !MediaSource.isTypeSupported(mime)) {
+        fail('MSE не поддерживает ' + mime);
+        return;
+    }
     ms = new MediaSource();
     $('v').src = URL.createObjectURL(ms);
     ms.addEventListener('sourceopen', function () {
-        sb = ms.addSourceBuffer(mime);
-        sb.mode = 'segments';
+        try {
+            sb = ms.addSourceBuffer(mime);
+            sb.mode = 'segments';
+        } catch (e) { fail('MSE: ' + e.message + ' (' + mime + ')'); return; }
+        sb.addEventListener('error', function () { fail('MSE buffer error'); });
         sb.addEventListener('updateend', drain);
-        append(initSegment(videoWidth(), videoHeight()));
+        append(initSegment(screen.width, screen.height));
     });
 }
 
-function videoWidth() { return screen.width; }
-function videoHeight() { return screen.height; }
-
 function append(data) { queue.push(data); drain(); }
-function appendFragment(pts, duration, sample) {
-    append(fragment(Math.round(pts), duration, sample));
-}
+function appendFragment(pts, duration, sample) { append(fragment(Math.round(pts), duration, sample)); }
 function drain() {
     if (!sb || sb.updating || !queue.length) return;
-    sb.appendBuffer(queue.shift());
-    // keep only the last seconds: a live stream must not grow a buffer forever
+    try { sb.appendBuffer(queue.shift()); } catch (e) { fail('append: ' + e.message); return; }
     try {
         var start = sb.buffered.start(0), end = sb.buffered.end(0);
         if (end - start > 6) sb.remove(start, end - 4);
@@ -229,6 +333,12 @@ function drain() {
     } catch (e) {}
 }
 
+function setStreaming(on) { $('msg').style.display = on ? 'none' : 'flex'; }
+
+$('v').addEventListener('error', function () {
+    var e = $('v').error;
+    fail('video: ' + (e && e.message ? e.message : 'ошибка') + (e && e.code ? ' code ' + e.code : ''));
+});
 $('go').onclick = start;
 document.body.ondblclick = function () {
     if (document.fullscreenElement) document.exitFullscreen();

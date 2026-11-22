@@ -192,8 +192,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         server.onClient = { [weak self] socket in
             socket.onText = { [weak self] message in
                 guard let self, (message["t"] as? String) == "hello" else { return }
-                let client = WebClient(socket: socket, hello: message)
+                // The plain-HTTP page cannot use TLS, so it asks for a pairing code instead: both
+                // ends stretch it into an AES-GCM key and seal everything that follows.
+                var channel: MessageSocket = socket
+                if (message["enc"] as? String) == "aes-gcm" {
+                    guard let saltText = message["salt"] as? String, let salt = Data(base64Encoded: saltText),
+                        let code = message["code"] as? String
+                    else {
+                        socket.close()
+                        return
+                    }
+                    let name = message["model"] as? String ?? "browser"
+                    let accepted = self.confirmPairing(name: name, code: code)
+                    guard accepted else {
+                        socket.close()
+                        return
+                    }
+                    let secure = EncryptedSocket(socket: socket)
+                    secure.activate(SecureChannel(code: code, salt: salt))
+                    socket.send(["t": "ok"])  // the page derives the key from the same code now
+                    secure.onText = socket.onText
+                    channel = secure
+                }
+                let client = WebClient(socket: channel, hello: message)
                 socket.send(client.welcome)
+                socket.onClosed = { [weak self] in
+                    Task { @MainActor in
+                        self?.webClients[client.id] = nil
+                        self?.refreshReceivers()
+                        log("web: \(client.name) disconnected")
+                    }
+                }
                 Task { @MainActor in
                     self.webClients[client.id] = client
                     self.refreshReceivers()
@@ -210,6 +239,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         } catch {
             log("web: not started: \(error.localizedDescription)")
         }
+    }
+
+    /// One dialog per browser: the TV shows the code, the person here just agrees.
+    private func confirmPairing(name: String, code: String) -> Bool {
+        var accepted = false
+        let work = {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Подключиться к \(name)?"
+            alert.informativeText = "Код на экране: \(code). Если он совпадает, разрешите показ."
+            alert.addButton(withTitle: "Разрешить")
+            alert.addButton(withTitle: "Отклонить")
+            accepted = alert.runModal() == .alertFirstButtonReturn
+            NSApp.setActivationPolicy(.accessory)
+        }
+        if Thread.isMainThread { work() } else { DispatchQueue.main.sync(execute: work) }
+        return accepted
     }
 
     @objc private func openWebClient() {
@@ -778,6 +825,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         state = "Connecting to \(receiver.name)…"
         rebuildMenu()
 
+        // A browser is not a TCP receiver: if its socket is gone, say so instead of dialling the page.
+        if receiver.id.hasPrefix("web-"), webClients[receiver.id] == nil {
+            state = "Browser is gone — reload the page"
+            rebuildMenu()
+            return
+        }
         let browser = webClients[receiver.id]
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {

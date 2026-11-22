@@ -5,7 +5,7 @@ import CommonCrypto
 import Foundation
 import Network
 
-public final class WebSocketConnection {
+public final class WebSocketConnection: MessageSocket, @unchecked Sendable {
     public var onText: (([String: Any]) -> Void)?
     public var onClosed: (() -> Void)?
 
