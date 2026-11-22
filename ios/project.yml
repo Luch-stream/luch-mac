@@ -10,10 +10,17 @@ targets:
   LuchiOS:
     type: application
     platform: iOS
-    sources: [Sources, Assets.xcassets]
+    sources:
+      - path: Sources
+        excludes: [Broadcast]
+      - Assets.xcassets
     dependencies:
       - package: Luch
         product: LuchReceive
+      - package: Luch
+        product: LuchProto
+      - target: LuchBroadcast
+        embed: true
     info:
       path: Info.plist
       properties:
@@ -38,3 +45,19 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+
+  LuchBroadcast:
+    type: app-extension
+    platform: iOS
+    sources: [Sources/SendCore, Sources/Broadcast]
+    dependencies:
+      - package: Luch
+        product: LuchProto
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.luch.ios.broadcast
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Broadcast/Info.plist
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
