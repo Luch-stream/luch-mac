@@ -191,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         let server = WebServer(identityDirectory: support)
         server.onClient = { [weak self] socket in
             socket.onText = { [weak self] message in
+                log("web: message \(message["t"] as? String ?? "?") enc=\(message["enc"] as? String ?? "-")")
                 guard let self, (message["t"] as? String) == "hello" else { return }
                 // The plain-HTTP page cannot use TLS, so it asks for a pairing code instead: both
                 // ends stretch it into an AES-GCM key and seal everything that follows.
@@ -382,6 +383,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             ]
         case "state":
             return ["state": state, "streaming": engine != nil, "stats": statsDictionary()]
+        case "allow", "deny":
+            // Pairing from the command line, for scripts and for a headless check.
+            let code = request["code"] as? String ?? ""
+            guard let pending = pendingPairings[code] else { return ["error": "no such code"] }
+            pendingPairings[code] = nil
+            if (request["cmd"] as? String) == "allow" {
+                approvedCode = (code, Date())
+                let secure = secureChannel(for: pending.socket, code: code, salt: pending.salt)
+                pending.socket.onText = { [weak self] message in
+                    guard let self, (message["t"] as? String) == "hello" else { return }
+                    let client = WebClient(socket: secure, hello: message)
+                    pending.socket.send(client.welcome)
+                    self.register(client: client, socket: pending.socket)
+                }
+            } else {
+                pending.socket.send(["t": "deny"])
+                pending.socket.close()
+            }
+            rebuildMenu()
+            return ["ok": true]
         case "stats":
             return ["stats": statsDictionary()]
         case "mirror":
