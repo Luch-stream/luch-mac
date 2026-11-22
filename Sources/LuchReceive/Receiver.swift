@@ -13,7 +13,9 @@ public protocol AudioSink: AnyObject {
     func stop()
 }
 
-public final class Receiver {
+/// Sockets and the Bonjour registration run on their own queues, so the value may cross threads;
+/// its mutable pieces are either write-once or guarded by the control server.
+public final class Receiver: @unchecked Sendable {
     public let name: String
     public let id: String
     public var accepting = true

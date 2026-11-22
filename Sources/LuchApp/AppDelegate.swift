@@ -166,10 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         discovery.onUpdate = { [weak self] in
             Task { @MainActor in self?.refreshReceivers() }
         }
-        discovery.start()
         let identity = senderIdentity()
-        discovery.publish(name: identity.name, id: identity.id)
-        startLocalServer()
+        let discovery = self.discovery
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Bonjour browsing/registration and the local API socket: none of it on the main queue.
+            discovery.start()
+            discovery.publish(name: identity.name, id: identity.id)
+            DispatchQueue.main.async { self?.startLocalServer() }
+        }
 
         rebuildMenu()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
@@ -243,14 +247,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
             }
         }
-        do {
-            try server.start(port: Proto.webPort, ip: webAddress())
-            web = server
-            if let ip = webAddress() {
-                webURL = URL(string: "https://\(ip):\(Proto.webPort)/")
+        // TLS setup (certificate generation) and the listeners are slow; the menu bar must not wait.
+        let address = webAddress()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try server.start(port: Proto.webPort, ip: address)
+                Task { @MainActor in
+                    self.web = server
+                    if let ip = address {
+                        self.webURL = URL(string: "https://\(ip):\(Proto.webPort)/")
+                    }
+                }
+            } catch {
+                Task { @MainActor in
+                    log("web: not started: \(error.localizedDescription)")
+                }
             }
-        } catch {
-            log("web: not started: \(error.localizedDescription)")
         }
     }
 

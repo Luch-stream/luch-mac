@@ -45,7 +45,15 @@ final class Viewer {
 
     func start() {
         guard receiver == nil else { return }
-        let receiver = Receiver(name: UIDevice.current.name, sink: relay, audioCodecs: ["audio/pcm"])
+        // Sockets and the Bonjour registration are slow; the first frame must not wait for them.
+        // The receiver is built here (it needs the device name), but it listens on its own queue:
+        // opening sockets and registering on Bonjour must never block the first frame.
+        begin(deviceName: UIDevice.current.name)
+    }
+
+    private func begin(deviceName: String) {
+        guard receiver == nil else { return }
+        let receiver = Receiver(name: deviceName, sink: relay, audioCodecs: ["audio/pcm"])
         receiver.makeAudio = { [weak self] fd in
             let sink = PcmSink(fd: fd)
             DispatchQueue.main.async {
@@ -71,12 +79,16 @@ final class Viewer {
                 MainActor.assumeIsolated { self?.failedToStart() }
             }
         }
-        do {
-            try receiver.start()
-            self.receiver = receiver
-        } catch {
-            // The port or the Bonjour registration is unavailable; retrying recreates the receiver.
-            phase = .failed
+        self.receiver = receiver
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                try receiver.start()
+            } catch {
+                // The port or the Bonjour registration is unavailable; retrying recreates it.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.phase = .failed }
+                }
+            }
         }
     }
 
