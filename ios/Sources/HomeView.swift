@@ -143,20 +143,24 @@ struct HomeView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
-            if let chosen {
-                Button {
-                    startBroadcast(to: chosen)
-                } label: {
+            if chosen != nil {
+                ZStack {
                     Text("Начать трансляцию")
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.black)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 11)
                         .background(LuchStyle.accent, in: Capsule())
+                    // The system's own button, invisible, on top: tapping it opens the confirmation.
+                    BroadcastPicker()
+                        .frame(width: 210, height: 46)
+                        .opacity(0.02)
                 }
-                .buttonStyle(.plain)
+                .frame(height: 46)
+                .accessibilityElement()
+                .accessibilityLabel("Начать трансляцию")
             } else {
-                Color.clear.frame(height: 40)
+                Color.clear.frame(height: 46)
             }
             Spacer(minLength: 0)
         }
@@ -202,7 +206,10 @@ struct HomeView: View {
                     empty: "Пока не найдены",
                     selected: chosen?.id,
                     icon: "display",
-                    onTap: { id in chosen = targets.first { $0.id == id } })
+                    onTap: { id in
+                        chosen = targets.first { $0.id == id }
+                        if let chosen { prepare(chosen) }
+                    })
             } else {
                 list(
                     viewer.senders.map { ($0.id, $0.name, "") },
@@ -275,7 +282,9 @@ struct HomeView: View {
 
     // MARK: - actions
 
-    private func startBroadcast(to target: SendTarget) {
+    /// The system picker starts the broadcast itself, so the target is stored the moment it is
+    /// chosen; there is no second step where the app could forget it.
+    private func prepare(_ target: SendTarget) {
         SendConfig.store(target)
         configServer.target = target
     }
