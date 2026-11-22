@@ -14,15 +14,14 @@ struct ContentView: View {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
-            // The system tab bar: a bottom bar on a phone, the side region on a closed Duo.
+            // Two pages the user swipes between; the dots below show where they are, and the
+            // page content (card, hints, buttons) is rebuilt as the page changes.
             TabView(selection: $mode) {
-                receiving
-                    .tag(Mode.receive)
-                    .tabItem { Label("Принимать", systemImage: "arrow.down.left.and.arrow.up.right") }
-                SendView(onSettings: presentSettings)
-                    .tag(Mode.send)
-                    .tabItem { Label("Отправлять", systemImage: "arrow.up.right.and.arrow.down.left") }
+                receiving.tag(Mode.receive)
+                SendView(onSettings: presentSettings).tag(Mode.send)
             }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .never))
         }
         .background {
             GeometryReader { proxy in
