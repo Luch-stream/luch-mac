@@ -7,7 +7,7 @@ public enum MediaKind: UInt8 {
     case audio = 2
 }
 
-public struct PacketFlags: OptionSet {
+public struct PacketFlags: OptionSet, Sendable {
     public let rawValue: UInt8
     public init(rawValue: UInt8) { self.rawValue = rawValue }
     public static let idr = PacketFlags(rawValue: 1 << 0)

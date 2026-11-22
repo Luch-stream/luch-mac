@@ -10,7 +10,7 @@ import LuchProto
 import ScreenCaptureKit
 import ServiceManagement
 
-final class Preferences {
+final class Preferences: @unchecked Sendable {
     static let shared = Preferences()
     private let defaults = UserDefaults.standard
 

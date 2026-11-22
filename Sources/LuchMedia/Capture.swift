@@ -6,7 +6,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import LuchProto
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 public enum FitMode: String, CaseIterable {
     /// Crop the source to the target aspect: one GPU transform, no black bars, fewer pixels.

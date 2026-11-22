@@ -7,7 +7,7 @@ import Foundation
 import LuchProto
 import LuchReceive
 
-public final class AudioSession: AudioSink {
+public final class AudioSession: AudioSink, @unchecked Sendable {
     private let fd: Int32
     private let lock = NSLock()
     private var running = true

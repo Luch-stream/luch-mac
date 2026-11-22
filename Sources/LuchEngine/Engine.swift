@@ -218,7 +218,7 @@ final class Flag {
     }
 }
 
-public final class Engine {
+public final class Engine: @unchecked Sendable {
     public private(set) var options: MirrorOptions
     /// CLI exits the process on stop; the menu-bar app will keep running instead.
     public var terminateOnStop = false
@@ -486,7 +486,9 @@ public final class Engine {
         }
 
         let started = DispatchSemaphore(value: 0)
-        var failure: Error?
+        // The task runs on another thread; a box keeps the error without sharing a mutable local.
+        final class FailureBox: @unchecked Sendable { var value: Error? }
+        let failureBox = FailureBox()
         let audio = (plan?.audio ?? options.audio) && audioTx != nil
         Task {
             do {
@@ -497,12 +499,12 @@ public final class Engine {
                     height: p?.height ?? options.height,
                     fps: p?.fps ?? options.fps, audio: audio, fit: options.fit)
             } catch {
-                failure = error
+                failureBox.value = error
             }
             started.signal()
         }
         started.wait()
-        if let failure {
+        if let failure = failureBox.value {
             log("capture failed: \(failure.localizedDescription)")
             self.capture = nil
             control?.send(["t": "stop"])

@@ -83,7 +83,7 @@ public struct CodecScore {
 }
 
 /// Decode times measured during real sessions, per receiver and per codec.
-public final class CodecMemory {
+public final class CodecMemory: @unchecked Sendable {
     public static let shared = CodecMemory()
     private let defaults = UserDefaults.standard
 
@@ -106,7 +106,7 @@ public final class CodecMemory {
 }
 
 public enum CodecPlanner {
-    private static var supportCache: [String: Bool] = [:]
+    nonisolated(unsafe) private static var supportCache: [String: Bool] = [:]
     private static let cacheLock = NSLock()
 
     public static func macSupports(_ codec: VideoCodec, width: Int, height: Int) -> Bool {

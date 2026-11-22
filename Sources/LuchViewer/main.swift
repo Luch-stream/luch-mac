@@ -5,7 +5,7 @@ import AppKit
 import LuchAudio
 import LuchReceive
 
-final class VideoView: NSView, VideoSink {
+final class VideoView: NSView, @preconcurrency VideoSink {
     private let displayLayer = AVSampleBufferDisplayLayer()
     var onBroken: (() -> Void)?
 

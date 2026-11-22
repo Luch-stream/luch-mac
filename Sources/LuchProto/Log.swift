@@ -5,7 +5,13 @@ import Foundation
 private let logStart = Date()
 
 /// When set, every line is also appended here (a bundled .app launched with `open` has no terminal).
-public var logFile: String?
+/// Written once at startup, before any streaming thread exists; the lock keeps that honest.
+private let logFileLock = NSLock()
+nonisolated(unsafe) private var logFileStorage: String?
+public var logFile: String? {
+    get { logFileLock.withLock { logFileStorage } }
+    set { logFileLock.withLock { logFileStorage = newValue } }
+}
 
 public func log(_ message: String) {
     let t = Date().timeIntervalSince(logStart)
