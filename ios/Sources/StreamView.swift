@@ -39,6 +39,8 @@ struct StreamView: View {
                         }
                         .padding(.leading, 8)
                     }
+                    // Separate items on purpose: the system moves each one where it belongs, so a
+                    // closed Duo collects them into its side region and an iPhone keeps a bottom bar.
                     ToolbarItemGroup(placement: .bottomBar) {
                         Button {
                             viewer.requestKeyframe()
