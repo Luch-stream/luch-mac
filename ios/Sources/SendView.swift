@@ -8,6 +8,8 @@ import SwiftUI
 struct SendView: View {
     let onSettings: () -> Void
     @State private var configServer = ConfigServer()
+    @State private var browser = ReceiverBrowser()
+    @State private var browseTask: Task<Void, Never>?
 
     @State private var targets: [SendTarget] = []
     @State private var choosing = false
@@ -30,6 +32,15 @@ struct SendView: View {
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity)
             }
+        }
+        .task {
+            configServer.start()
+            browseTask = Task { @MainActor in
+                for await list in browser.updates() {
+                    targets = list
+                }
+            }
+            browser.start()
         }
     }
 
