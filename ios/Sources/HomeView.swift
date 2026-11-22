@@ -16,7 +16,6 @@ struct HomeView: View {
     @State private var configServer = ConfigServer()
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
-    @State private var pickerTrigger = 0
 
     private var sending: Bool { pageIndex == 1 }
     private var deviceName: String { UIDevice.current.name }
@@ -155,27 +154,18 @@ struct HomeView: View {
             }
 
             if chosen != nil {
-                Button {
-                    pickerTrigger += 1
-                } label: {
+                HStack(spacing: 10) {
                     Text("Начать трансляцию")
                         .font(.callout.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 11)
-                        .background(LuchStyle.accent, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .frame(height: 52)
-                .background(alignment: .center) {
-                    // A real size for layout, zero visual footprint: the system button needs a
-                    // laid-out view, not a 1×1 one, before it can be pressed for us.
-                    BroadcastPicker(trigger: pickerTrigger)
+                        .foregroundStyle(LuchStyle.primaryText)
+                    BroadcastPicker()
                         .frame(width: 44, height: 44)
-                        .opacity(0.001)
-                        .allowsHitTesting(false)
-                        .clipped()
                 }
+                .padding(.leading, 18)
+                .padding(.trailing, 4)
+                .padding(.vertical, 4)
+                .background(LuchStyle.accent.opacity(0.18), in: Capsule())
+                .frame(height: 52)
             } else {
                 Color.clear.frame(height: 52)
             }
