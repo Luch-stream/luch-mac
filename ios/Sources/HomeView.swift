@@ -154,23 +154,19 @@ struct HomeView: View {
             }
 
             if chosen != nil {
-                ZStack {
+                HStack(spacing: 10) {
                     Text("Начать трансляцию")
                         .font(.callout.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 11)
-                        .background(LuchStyle.accent, in: Capsule())
-                    // The system's own button, invisible, on top: tapping it opens the confirmation.
+                        .foregroundStyle(LuchStyle.primaryText)
                     BroadcastPicker()
-                        .frame(width: 210, height: 46)
-                        .opacity(0.02)
+                        .frame(width: 44, height: 44)
                 }
-                .frame(height: 46)
-                .accessibilityElement()
-                .accessibilityLabel("Начать трансляцию")
+                .padding(.leading, 18)
+                .padding(.vertical, 4)
+                .background(LuchStyle.accent.opacity(0.18), in: Capsule())
+                .frame(height: 52)
             } else {
-                Color.clear.frame(height: 46)
+                Color.clear.frame(height: 52)
             }
             Spacer(minLength: 0)
         }

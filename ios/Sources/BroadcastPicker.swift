@@ -6,10 +6,10 @@ import SwiftUI
 
 struct BroadcastPicker: UIViewRepresentable {
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let view = RPSystemBroadcastPickerView(
-            frame: CGRect(x: 0, y: 0, width: 60, height: 60))
+        let view = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         view.preferredExtension = "dev.luch.ios.broadcast"
         view.showsMicrophoneButton = false
+        view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }
 
