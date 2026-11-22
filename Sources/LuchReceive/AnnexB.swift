@@ -71,7 +71,8 @@ public enum AnnexB {
     }
 
     /// Builds the format description from SPS/PPS (and VPS for HEVC), ordered the way the system wants.
-    public static func formatDescription(codec: Codec, parameterSets: [[UInt8]]) -> CMVideoFormatDescription? {
+    public static func formatDescription(codec: Codec, parameterSets: [[UInt8]]) -> CMVideoFormatDescription?
+    {
         let types = codec.parameterSetTypes
         func pick(_ type: Int) -> [UInt8]? {
             parameterSets.first { $0.first.map { codec.nalType($0) == type } ?? false }
@@ -118,22 +119,28 @@ public enum AnnexB {
     }
 
     /// Wraps an AVCC sample in a sample buffer that the display layer shows immediately.
-    public static func sampleBuffer(_ sample: [UInt8], format: CMVideoFormatDescription,
-                                    pts: CMTime, timescale: CMTimeScale) -> CMSampleBuffer? {
+    public static func sampleBuffer(
+        _ sample: [UInt8], format: CMVideoFormatDescription,
+        pts: CMTime, timescale: CMTimeScale
+    ) -> CMSampleBuffer? {
         guard !sample.isEmpty else { return nil }
         var block: CMBlockBuffer?
-        guard CMBlockBufferCreateWithMemoryBlock(
-            allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: sample.count,
-            blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
-            dataLength: sample.count, flags: 0, blockBufferOut: &block) == noErr, let block else { return nil }
+        guard
+            CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: sample.count,
+                blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+                dataLength: sample.count, flags: 0, blockBufferOut: &block) == noErr, let block
+        else { return nil }
         let copied = sample.withUnsafeBytes { raw in
-            CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block,
-                                          offsetIntoDestination: 0, dataLength: sample.count)
+            CMBlockBufferReplaceDataBytes(
+                with: raw.baseAddress!, blockBuffer: block,
+                offsetIntoDestination: 0, dataLength: sample.count)
         }
         guard copied == noErr else { return nil }
 
-        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: timescale),
-                                        presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: timescale),
+            presentationTimeStamp: pts, decodeTimeStamp: .invalid)
         var size = sample.count
         var sampleBuffer: CMSampleBuffer?
         let status = CMSampleBufferCreateReady(
@@ -143,10 +150,12 @@ public enum AnnexB {
         guard status == noErr, let sampleBuffer else { return nil }
 
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true),
-           CFArrayGetCount(attachments) > 0 {
+            CFArrayGetCount(attachments) > 0
+        {
             let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+            CFDictionarySetValue(
+                dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
         return sampleBuffer
     }

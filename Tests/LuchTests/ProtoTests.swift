@@ -1,12 +1,14 @@
+import LuchMedia
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-import LuchMedia
+
 @testable import LuchProto
 
 final class ProtoTests: XCTestCase {
     func testHeaderLayout() {
-        let h = Proto.header(kind: .video, flags: [.idr], shard: 2, shards: 5,
-                             seq: 0x01020304, ptsUS: 0x0a0b0c0d, frameLen: 7000, hostLat: 33)
+        let h = Proto.header(
+            kind: .video, flags: [.idr], shard: 2, shards: 5,
+            seq: 0x0102_0304, ptsUS: 0x0a0b_0c0d, frameLen: 7000, hostLat: 33)
         XCTAssertEqual(Array(h[0..<8]), [1, 1, 0, 2, 0, 5, 0, 0])
         XCTAssertEqual(Array(h[8..<12]), [1, 2, 3, 4])
         XCTAssertEqual(Array(h[12..<16]), [0x0a, 0x0b, 0x0c, 0x0d])
@@ -49,7 +51,8 @@ final class ProtoTests: XCTestCase {
             avcc.append(nal)
         }
         let out = VideoEncoder.annexB(avcc, nalLengthSize: 4, paramSets: [sps, pps], isIDR: true)
-        let expected = Data([0, 0, 0, 1]) + sps + Data([0, 0, 0, 1]) + pps
+        let expected =
+            Data([0, 0, 0, 1]) + sps + Data([0, 0, 0, 1]) + pps
             + Data([0, 0, 0, 1]) + sei + Data([0, 0, 0, 1]) + idr
         XCTAssertEqual(out, expected)
     }
@@ -65,7 +68,7 @@ final class ProtoTests: XCTestCase {
     }
 
     func testAnnexBStopsOnTruncatedNal() {
-        var avcc = Data([0, 0, 0, 99]) // promises 99 bytes, has none
+        var avcc = Data([0, 0, 0, 99])  // promises 99 bytes, has none
         avcc.append(Data([0x65]))
         let out = VideoEncoder.annexB(avcc, nalLengthSize: 4, paramSets: [], isIDR: false)
         XCTAssertTrue(out.isEmpty)

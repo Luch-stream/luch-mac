@@ -31,7 +31,7 @@ public final class VideoDecoder {
             }
         }
         if status != noErr {
-            onDecodeTime?(-1)   // a failed frame still tells us the decoder is unhappy
+            onDecodeTime?(-1)  // a failed frame still tells us the decoder is unhappy
         }
     }
 
@@ -44,8 +44,12 @@ public final class VideoDecoder {
     private func rebuild(_ description: CMVideoFormatDescription) {
         reset()
         format = description
-        let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
-        let specification: [String: Any] = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder as String: true]
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        ]
+        let specification: [String: Any] = [
+            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder as String: true
+        ]
         var created: VTDecompressionSession?
         let status = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault, formatDescription: description,
@@ -60,19 +64,26 @@ public final class VideoDecoder {
     /// A decoded frame as a sample buffer the display layer can show immediately.
     private static func imageSample(_ image: CVImageBuffer, pts: CMTime) -> CMSampleBuffer? {
         var description: CMVideoFormatDescription?
-        guard CMVideoFormatDescriptionCreateForImageBuffer(
-            allocator: kCFAllocatorDefault, imageBuffer: image,
-            formatDescriptionOut: &description) == noErr, let description else { return nil }
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+        guard
+            CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault, imageBuffer: image,
+                formatDescriptionOut: &description) == noErr, let description
+        else { return nil }
+        var timing = CMSampleTimingInfo(
+            duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?
-        guard CMSampleBufferCreateReadyWithImageBuffer(
-            allocator: kCFAllocatorDefault, imageBuffer: image, formatDescription: description,
-            sampleTiming: &timing, sampleBufferOut: &sample) == noErr, let sample else { return nil }
+        guard
+            CMSampleBufferCreateReadyWithImageBuffer(
+                allocator: kCFAllocatorDefault, imageBuffer: image, formatDescription: description,
+                sampleTiming: &timing, sampleBufferOut: &sample) == noErr, let sample
+        else { return nil }
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
-           CFArrayGetCount(attachments) > 0 {
+            CFArrayGetCount(attachments) > 0
+        {
             let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+            CFDictionarySetValue(
+                dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
         return sample
     }

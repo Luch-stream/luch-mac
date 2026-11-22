@@ -29,20 +29,26 @@ public final class ScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var frames = 0
     private var audioBuffers = 0
 
-    public func start(displayIndex: Int?, width: Int, height: Int, fps: Int, audio: Bool,
-                      fit: FitMode = .crop) async throws {
+    public func start(
+        displayIndex: Int?, width: Int, height: Int, fps: Int, audio: Bool,
+        fit: FitMode = .crop
+    ) async throws {
         let content = try await Self.shareableContent()
         guard !content.displays.isEmpty else { throw CaptureError.noDisplays }
         let displays = content.displays
         let display: SCDisplay
         if let index = displayIndex {
-            guard index >= 0 && index < displays.count else { throw CaptureError.badDisplay(index, displays.count) }
+            guard index >= 0 && index < displays.count else {
+                throw CaptureError.badDisplay(index, displays.count)
+            }
             display = displays[index]
         } else {
             let mainID = CGMainDisplayID()
             display = displays.first(where: { $0.displayID == mainID }) ?? displays[0]
         }
-        log("capture: display \(display.displayID) \(display.width)x\(display.height) -> \(width)x\(height)@\(fps) audio=\(audio)")
+        log(
+            "capture: display \(display.displayID) \(display.width)x\(display.height) -> \(width)x\(height)@\(fps) audio=\(audio)"
+        )
 
         let config = SCStreamConfiguration()
         config.width = width
@@ -76,8 +82,10 @@ public final class ScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 }
                 config.sourceRect = rect
                 config.scalesToFit = false
-                log(String(format: "capture: crop %.0fx%.0f at (%.0f,%.0f) -> %dx%d",
-                           rect.width, rect.height, rect.origin.x, rect.origin.y, width, height))
+                log(
+                    String(
+                        format: "capture: crop %.0fx%.0f at (%.0f,%.0f) -> %dx%d",
+                        rect.width, rect.height, rect.origin.x, rect.origin.y, width, height))
             }
         case .letterbox:
             if #available(macOS 14.0, *) { config.scalesToFit = true }
@@ -109,13 +117,15 @@ public final class ScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private static func screen(for displayID: CGDirectDisplayID) -> NSScreen? {
         NSScreen.screens.first { screen in
-            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+                == displayID
         }
     }
 
     private static func shareableContent() async throws -> SCShareableContent {
         try await withCheckedThrowingContinuation { cont in
-            SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
+            SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) {
+                content, error in
                 if let error {
                     cont.resume(throwing: error)
                 } else if let content {
@@ -129,11 +139,14 @@ public final class ScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     // MARK: - SCStreamOutput
 
-    public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    public func stream(
+        _ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType
+    ) {
         switch type {
         case .screen:
             guard sampleBuffer.isValid, isComplete(sampleBuffer),
-                  let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                let buffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+            else { return }
             frames += 1
             onFrame?(buffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
         case .audio:
@@ -152,9 +165,12 @@ public final class ScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     /// ScreenCaptureKit also delivers "idle" frames (nothing changed): those have no new picture.
     private func isComplete(_ sampleBuffer: CMSampleBuffer) -> Bool {
-        guard let raw = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let statusRaw = raw.first?[.status] as? Int,
-              let status = SCFrameStatus(rawValue: statusRaw) else {
+        guard
+            let raw = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+                as? [[SCStreamFrameInfo: Any]],
+            let statusRaw = raw.first?[.status] as? Int,
+            let status = SCFrameStatus(rawValue: statusRaw)
+        else {
             return true
         }
         return status == .complete
@@ -170,7 +186,7 @@ public enum CaptureError: Error, LocalizedError {
         switch self {
         case .noDisplays: return "no displays to capture"
         case .noContent: return "ScreenCaptureKit returned no content (screen recording permission?)"
-        case let .badDisplay(index, count): return "display \(index) does not exist (\(count) available)"
+        case .badDisplay(let index, let count): return "display \(index) does not exist (\(count) available)"
         }
     }
 }

@@ -3,8 +3,8 @@
 // samples (48 kHz, stereo) and `OpusHead` carries the encoder's real pre-skip.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import COpus
-import Darwin
 import CoreMedia
+import Darwin
 import Foundation
 import LuchProto
 
@@ -25,14 +25,19 @@ public final class OpusAudio {
     public let channels: Int = 2
     public let frameMs: Int
 
-    private var frameSamples: Int { sampleRate * frameMs / 1000 } // 240
+    private var frameSamples: Int { sampleRate * frameMs / 1000 }  // 240
 
-    public init?(bitrate: Int = Proto.audioBps, frameMs: Int = Proto.audioFrameMs,
-                 fec: Bool = true, lossPercent: Int = 5) {
+    public init?(
+        bitrate: Int = Proto.audioBps, frameMs: Int = Proto.audioFrameMs,
+        fec: Bool = true, lossPercent: Int = 5
+    ) {
         self.frameMs = frameMs
         var error: Int32 = 0
-        guard let enc = opus_encoder_create(Int32(sampleRate), Int32(channels),
-                                            Int32(OPUS_APPLICATION_RESTRICTED_LOWDELAY), &error) else {
+        guard
+            let enc = opus_encoder_create(
+                Int32(sampleRate), Int32(channels),
+                Int32(OPUS_APPLICATION_RESTRICTED_LOWDELAY), &error)
+        else {
             log("audio: opus_encoder_create failed: \(error)")
             return nil
         }
@@ -47,8 +52,9 @@ public final class OpusAudio {
         var lookahead: Int32 = 0
         _ = luch_opus_lookahead(enc, &lookahead)
         preSkip = UInt16(max(0, min(Int32(UInt16.max), lookahead)))
-        log("audio: Opus \(sampleRate) Hz x\(channels), \(frameMs) ms frames, \(bitrate) bps CBR, "
-            + "pre-skip \(preSkip), FEC \(fec ? "on at \(lossPercent)%" : "off")")
+        log(
+            "audio: Opus \(sampleRate) Hz x\(channels), \(frameMs) ms frames, \(bitrate) bps CBR, "
+                + "pre-skip \(preSkip), FEC \(fec ? "on at \(lossPercent)%" : "off")")
     }
 
     deinit {
@@ -60,7 +66,8 @@ public final class OpusAudio {
     /// Feeds one ScreenCaptureKit audio buffer.
     public func push(_ sampleBuffer: CMSampleBuffer) {
         guard encoder != nil, let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { return }
+            let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(format)
+        else { return }
         let asbd = asbdPointer.pointee
         guard Int(asbd.mSampleRate) == sampleRate, Int(asbd.mChannelsPerFrame) == channels else {
             if !warnedFormat {
@@ -90,9 +97,10 @@ public final class OpusAudio {
         let nonInterleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
         if !loggedFormat {
             loggedFormat = true
-            log("audio: fmt float=\(isFloat) packed=\(packed) noninterleaved=\(nonInterleaved) " +
-                "bytesPerFrame=\(asbd.mBytesPerFrame) framesPerPacket=\(asbd.mFramesPerPacket) " +
-                "buffers=\(list.count) ch=\(asbd.mChannelsPerFrame) rate=\(asbd.mSampleRate)")
+            log(
+                "audio: fmt float=\(isFloat) packed=\(packed) noninterleaved=\(nonInterleaved) "
+                    + "bytesPerFrame=\(asbd.mBytesPerFrame) framesPerPacket=\(asbd.mFramesPerPacket) "
+                    + "buffers=\(list.count) ch=\(asbd.mChannelsPerFrame) rate=\(asbd.mSampleRate)")
         }
         guard let samples = interleaved(list, isFloat: isFloat, frames: frames) else { return }
         var sum = 0.0
@@ -129,7 +137,8 @@ public final class OpusAudio {
                 continue
             }
             let packet = Data(buffer[0..<Int(written)])
-            let framePTS = CMTimeAdd(pts, CMTime(value: CMTimeValue(framesEmitted * UInt64(frameMs)), timescale: 1000))
+            let framePTS = CMTimeAdd(
+                pts, CMTime(value: CMTimeValue(framesEmitted * UInt64(frameMs)), timescale: 1000))
             framesEmitted += 1
             out.append(packet)
             onPacket?(packet, framePTS)
@@ -137,14 +146,17 @@ public final class OpusAudio {
         return out
     }
 
-    private func interleaved(_ list: UnsafeMutableAudioBufferListPointer, isFloat: Bool, frames: Int) -> [Float]? {
+    private func interleaved(_ list: UnsafeMutableAudioBufferListPointer, isFloat: Bool, frames: Int)
+        -> [Float]?
+    {
         // Interleaved: one buffer with `channels` channels. Non-interleaved: one buffer per channel.
         if list.count == 1 {
             let buffer = list[0]
             guard let data = buffer.mData else { return nil }
             if isFloat {
                 let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                return Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: count))
+                return Array(
+                    UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: count))
             }
             let count = Int(buffer.mDataByteSize) / MemoryLayout<Int16>.size
             let ints = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Int16.self), count: count)

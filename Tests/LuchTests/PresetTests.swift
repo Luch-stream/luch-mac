@@ -1,6 +1,6 @@
+import LuchEngine
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-import LuchEngine
 
 final class PresetTests: XCTestCase {
     func testHeights() {
@@ -25,10 +25,12 @@ final class PresetTests: XCTestCase {
         let caps = ReceiverCaps(welcome: [
             "t": "welcome", "name": "tv", "model": "m", "max": "1920x1080", "modes": ["mirror"],
             "decoders": ["video/avc", "video/hevc"],
-            "hw": ["video": [
-                "video/avc": ["decoder": "a", "max": "1920x1080", "1080p60": true, "low_latency": true],
-                "video/hevc": ["decoder": "b", "max": "1920x1080", "1080p60": true, "low_latency": true],
-            ], "display": ["type": "tv", "modes": ["1920x1080@60"]]],
+            "hw": [
+                "video": [
+                    "video/avc": ["decoder": "a", "max": "1920x1080", "1080p60": true, "low_latency": true],
+                    "video/hevc": ["decoder": "b", "max": "1920x1080", "1080p60": true, "low_latency": true],
+                ], "display": ["type": "tv", "modes": ["1920x1080@60"]],
+            ],
         ])!
         var options = MirrorOptions()
         options.codec = .auto

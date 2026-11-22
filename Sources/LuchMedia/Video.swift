@@ -75,7 +75,9 @@ public final class VideoEncoder {
         VTIsHardwareDecodeSupported(codec.cmType)
     }
 
-    public init?(codec: VideoCodec, width: Int, height: Int, fps: Int, kbps: Int, profile: VideoProfile? = nil) {
+    public init?(
+        codec: VideoCodec, width: Int, height: Int, fps: Int, kbps: Int, profile: VideoProfile? = nil
+    ) {
         self.codec = codec
         self.width = width
         self.height = height
@@ -194,7 +196,9 @@ public final class VideoEncoder {
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         packets += 1
         if isIRAP {
-            log("encoder: \(codec.label) key frame #\(packets) \(annexB.count) bytes, parameter sets \(paramSets.count)")
+            log(
+                "encoder: \(codec.label) key frame #\(packets) \(annexB.count) bytes, parameter sets \(paramSets.count)"
+            )
         }
         onPacket?(annexB, isIRAP, pts)
     }
@@ -223,18 +227,22 @@ public final class VideoEncoder {
             switch codec {
             case .h264:
                 status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    format, parameterSetIndex: i, parameterSetPointerOut: &pointer, parameterSetSizeOut: &size,
+                    format, parameterSetIndex: i, parameterSetPointerOut: &pointer,
+                    parameterSetSizeOut: &size,
                     parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
             case .hevc:
                 status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                    format, parameterSetIndex: i, parameterSetPointerOut: &pointer, parameterSetSizeOut: &size,
+                    format, parameterSetIndex: i, parameterSetPointerOut: &pointer,
+                    parameterSetSizeOut: &size,
                     parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
             }
             if status == noErr, let pointer, size > 0 {
                 paramSets.append(Data(bytes: pointer, count: size))
             }
         }
-        log("encoder: \(codec.label) parameter sets: \(paramSets.map { $0.count }) bytes, NAL length size \(nalLengthSize)")
+        log(
+            "encoder: \(codec.label) parameter sets: \(paramSets.map { $0.count }) bytes, NAL length size \(nalLengthSize)"
+        )
     }
 
     /// Splits a length-prefixed (AVCC) buffer into raw NAL units.

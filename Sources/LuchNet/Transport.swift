@@ -27,7 +27,9 @@ public final class UdpSender {
     }
 
     /// Opens and connects the socket; nil on any failure (details are logged).
-    public static func open(kind: MediaKind, ip: String, port: UInt16, interfaceIndex: UInt32, dscp: Int32) -> UdpSender? {
+    public static func open(kind: MediaKind, ip: String, port: UInt16, interfaceIndex: UInt32, dscp: Int32)
+        -> UdpSender?
+    {
         let label = kind == .video ? "video" : "audio"
         let s = socket(AF_INET, SOCK_DGRAM, 0)
         guard s >= 0 else {
@@ -96,8 +98,10 @@ public final class UdpSender {
                 usleep(250)
             }
             packet.removeAll(keepingCapacity: true)
-            packet.append(contentsOf: Proto.header(kind: kind, flags: flags, shard: UInt16(i), shards: shards,
-                                                   seq: sq, ptsUS: ptsUS, frameLen: UInt32(frame.count), hostLat: hostLat))
+            packet.append(
+                contentsOf: Proto.header(
+                    kind: kind, flags: flags, shard: UInt16(i), shards: shards,
+                    seq: sq, ptsUS: ptsUS, frameLen: UInt32(frame.count), hostLat: hostLat))
             packet.append(contentsOf: chunk)
             let n = packet.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, 0) }
             if n < 0 {

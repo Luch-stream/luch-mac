@@ -128,15 +128,19 @@ public struct ReceiverCaps {
 
     /// Short human-readable table for logs and `luch caps`.
     public func describe() -> String {
-        var lines = ["receiver: \(name) (\(model)) type=\(deviceType)",
-                     "modes: \(modes.joined(separator: ","))  max: \(maxSize)  opus: \(hasOpus ? "yes" : "no")  " +
-                     "render: \(renderWidth)x\(renderHeight)@\(refreshRate)Hz (max \(maxRefreshRate))"]
+        var lines = [
+            "receiver: \(name) (\(model)) type=\(deviceType)",
+            "modes: \(modes.joined(separator: ","))  max: \(maxSize)  opus: \(hasOpus ? "yes" : "no")  "
+                + "render: \(renderWidth)x\(renderHeight)@\(refreshRate)Hz (max \(maxRefreshRate))",
+        ]
         for codec in VideoCodec.allCases {
             guard let cap = cap(codec) else { continue }
             let bench = cap.benchMs.map { String(format: "%.1f ms", $0) } ?? "-"
-            lines.append("  \(codec.rawValue): decoder=\(cap.decoder) max=\(cap.maxWidth)x\(cap.maxHeight) " +
-                         "1080p60=\(cap.fullHD60 ? "y" : "n") 2160p60=\(cap.uhd60 ? "y" : "n") " +
-                         "10bit=\(cap.tenBit ? "y" : "n") low_latency=\(cap.lowLatency ? "y" : "n") bench=\(bench)")
+            lines.append(
+                "  \(codec.rawValue): decoder=\(cap.decoder) max=\(cap.maxWidth)x\(cap.maxHeight) "
+                    + "1080p60=\(cap.fullHD60 ? "y" : "n") 2160p60=\(cap.uhd60 ? "y" : "n") "
+                    + "10bit=\(cap.tenBit ? "y" : "n") low_latency=\(cap.lowLatency ? "y" : "n") bench=\(bench)"
+            )
         }
         if let prefer { lines.append("  prefer: \(prefer)  (bench at \(benchRes ?? "?"))") }
         return lines.joined(separator: "\n")

@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
 import VideoToolbox
+
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #endif
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 public enum ReceiveCaps {
@@ -18,7 +19,8 @@ public enum ReceiveCaps {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("viewer-id")
         if let text = try? String(contentsOf: file, encoding: .utf8),
-           text.trimmingCharacters(in: .whitespacesAndNewlines).count == 36 {
+            text.trimmingCharacters(in: .whitespacesAndNewlines).count == 36
+        {
             return text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let id = UUID().uuidString
@@ -28,15 +30,15 @@ public enum ReceiveCaps {
 
     public static func model() -> String {
         #if canImport(UIKit)
-        return "\(UIDevice.current.model) \(UIDevice.current.systemVersion)"
+            return "\(UIDevice.current.model) \(UIDevice.current.systemVersion)"
         #else
-        var uts = utsname()
-        uname(&uts)
-        let machine = withUnsafeBytes(of: &uts.machine) { raw -> String in
-            let bytes = raw.prefix { $0 != 0 }
-            return String(decoding: bytes, as: UTF8.self)
-        }
-        return machine.isEmpty ? "Mac" : machine
+            var uts = utsname()
+            uname(&uts)
+            let machine = withUnsafeBytes(of: &uts.machine) { raw -> String in
+                let bytes = raw.prefix { $0 != 0 }
+                return String(decoding: bytes, as: UTF8.self)
+            }
+            return machine.isEmpty ? "Mac" : machine
         #endif
     }
 
@@ -44,20 +46,20 @@ public enum ReceiveCaps {
     public static func screen() -> (width: Int, height: Int, refresh: Int) {
         func read() -> (Int, Int, Int) {
             #if canImport(UIKit)
-            let bounds = UIScreen.main.bounds
-            let scale = UIScreen.main.scale
-            let width = Int((bounds.width * scale).rounded())
-            let height = Int((bounds.height * scale).rounded())
-            let refresh = UIScreen.main.maximumFramesPerSecond
-            return (width, height, refresh > 0 ? refresh : 60)
+                let bounds = UIScreen.main.bounds
+                let scale = UIScreen.main.scale
+                let width = Int((bounds.width * scale).rounded())
+                let height = Int((bounds.height * scale).rounded())
+                let refresh = UIScreen.main.maximumFramesPerSecond
+                return (width, height, refresh > 0 ? refresh : 60)
             #elseif canImport(AppKit)
-            guard let screen = NSScreen.main ?? NSScreen.screens.first else { return (1920, 1080, 60) }
-            let scale = screen.backingScaleFactor
-            let width = Int((screen.frame.width * scale).rounded())
-            let height = Int((screen.frame.height * scale).rounded())
-            return (width, height, screen.maximumFramesPerSecond > 0 ? screen.maximumFramesPerSecond : 60)
+                guard let screen = NSScreen.main ?? NSScreen.screens.first else { return (1920, 1080, 60) }
+                let scale = screen.backingScaleFactor
+                let width = Int((screen.frame.width * scale).rounded())
+                let height = Int((screen.frame.height * scale).rounded())
+                return (width, height, screen.maximumFramesPerSecond > 0 ? screen.maximumFramesPerSecond : 60)
             #else
-            return (1920, 1080, 60)
+                return (1920, 1080, 60)
             #endif
         }
         if Thread.isMainThread { return read() }
@@ -71,8 +73,10 @@ public enum ReceiveCaps {
         let maxSize = hevc || avc ? "3840x2160" : "1920x1080"
 
         func decoder(_ mime: String, _ name: String) -> [String: Any] {
-            ["decoder": name, "max": maxSize, "1080p60": true, "2160p60": true, "10bit": false,
-             "low_latency": true]
+            [
+                "decoder": name, "max": maxSize, "1080p60": true, "2160p60": true, "10bit": false,
+                "low_latency": true,
+            ]
         }
         var video: [String: Any] = [:]
         var decoders: [String] = []
@@ -97,8 +101,11 @@ public enum ReceiveCaps {
         ]
 
         // No benchmark yet: the decoder list and the preferred codec are enough for both senders.
-        var bench: [String: Any] = ["prefer": hevc ? "video/hevc" : "video/avc",
-                                    "res": "\(screen.width > screen.height ? 1920 : 1080)x\(screen.width > screen.height ? 1080 : 1920)"]
+        var bench: [String: Any] = [
+            "prefer": hevc ? "video/hevc" : "video/avc",
+            "res":
+                "\(screen.width > screen.height ? 1920 : 1080)x\(screen.width > screen.height ? 1080 : 1920)",
+        ]
         // Decode times from earlier sessions, so a sender starts from measurements, not guesses.
         for mime in decoders {
             let ms = UserDefaults.standard.double(forKey: "decode.\(mime)")

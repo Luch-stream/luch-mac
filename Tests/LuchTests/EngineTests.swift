@@ -1,6 +1,6 @@
+import LuchEngine
 // SPDX-License-Identifier: GPL-3.0-or-later
 import XCTest
-import LuchEngine
 
 final class EngineTests: XCTestCase {
     /// The receiver tears the session down after 15 s without video packets; both keepalive rates must

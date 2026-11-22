@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-import XCTest
 import LuchMedia
 import LuchProto
+// SPDX-License-Identifier: GPL-3.0-or-later
+import XCTest
 
 final class AudioTests: XCTestCase {
     func testOpusHeadUsesEncoderPreSkip() throws {
@@ -22,10 +22,10 @@ final class AudioTests: XCTestCase {
         var packets: [Data] = []
         audio.onPacket = { data, _ in packets.append(data) }
 
-        audio.emit([Float](repeating: 0, count: 480), pts: .zero) // exactly 5 ms stereo
+        audio.emit([Float](repeating: 0, count: 480), pts: .zero)  // exactly 5 ms stereo
         XCTAssertEqual(packets.count, 1)
 
-        audio.emit([Float](repeating: 0, count: 960), pts: .zero) // exactly 10 ms
+        audio.emit([Float](repeating: 0, count: 960), pts: .zero)  // exactly 10 ms
         XCTAssertEqual(packets.count, 3)
         XCTAssertTrue(packets.allSatisfy { !$0.isEmpty && $0.count < 4000 })
     }
@@ -34,9 +34,9 @@ final class AudioTests: XCTestCase {
         let audio = try XCTUnwrap(OpusAudio())
         var packets: [Data] = []
         audio.onPacket = { data, _ in packets.append(data) }
-        audio.emit([Float](repeating: 0, count: 300), pts: .zero) // 3.1 ms: not a whole frame
+        audio.emit([Float](repeating: 0, count: 300), pts: .zero)  // 3.1 ms: not a whole frame
         XCTAssertEqual(packets.count, 0)
-        audio.emit([Float](repeating: 0, count: 180), pts: .zero) // tops it up to 5 ms
+        audio.emit([Float](repeating: 0, count: 180), pts: .zero)  // tops it up to 5 ms
         XCTAssertEqual(packets.count, 1)
     }
 }

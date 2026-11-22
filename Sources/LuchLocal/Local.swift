@@ -60,7 +60,10 @@ public final class LocalServer {
 
     public func stop() {
         running = false
-        if listenFD >= 0 { close(listenFD); listenFD = -1 }
+        if listenFD >= 0 {
+            close(listenFD)
+            listenFD = -1
+        }
         unlink(path)
         log("local: stopped")
     }
@@ -113,7 +116,7 @@ public enum LocalError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case let .socket(why): return "local socket: \(why)"
+        case .socket(let why): return "local socket: \(why)"
         case .notRunning: return "Luch.app is not running (no control socket)"
         }
     }

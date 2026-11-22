@@ -39,7 +39,9 @@ public final class AudioSession: AudioSink {
 
     private func setup() {
         // The mixer only accepts the standard (deinterleaved) float layout.
-        guard let audioFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2) else { return }
+        guard let audioFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2) else {
+            return
+        }
         format = audioFormat
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: audioFormat)
@@ -56,11 +58,15 @@ public final class AudioSession: AudioSink {
         Darwin.close(fd)
         player.stop()
         engine.stop()
-        if let decoder { opus_decoder_destroy(decoder); self.decoder = nil }
+        if let decoder {
+            opus_decoder_destroy(decoder)
+            self.decoder = nil
+        }
     }
 
     public func frames() -> Int {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
         return frameCount
     }
 
@@ -74,7 +80,10 @@ public final class AudioSession: AudioSink {
             let n = datagram.withUnsafeMutableBytes { raw in
                 recv(fd, raw.baseAddress, raw.count, 0)
             }
-            if n <= 0 { if !running { break }; continue }
+            if n <= 0 {
+                if !running { break }
+                continue
+            }
             guard datagram[0] == MediaKind.audio.rawValue, n > Proto.headerSize else { continue }
             let flags = PacketFlags(rawValue: datagram[1])
             let shard = Int(datagram.be16(2))
@@ -118,13 +127,18 @@ public final class AudioSession: AudioSink {
 
     private func conceal() {
         lock.lock()
-        guard let decoder else { lock.unlock(); return }
+        guard let decoder else {
+            lock.unlock()
+            return
+        }
         lock.unlock()
         var pcm = [Float](repeating: 0, count: 5760 * 2)
         // The decoder itself produces the concealment frame; FEC data from the next packet would be
         // used with decode_fec = 1, but a plain PLC is enough for one lost 10-20 ms frame.
         _ = opus_decode_float(decoder, nil, 0, &pcm, 5760, 0)
-        lock.lock(); concealed += 1; lock.unlock()
+        lock.lock()
+        concealed += 1
+        lock.unlock()
     }
 
     private func configure(head: [UInt8]) {
@@ -144,7 +158,10 @@ public final class AudioSession: AudioSink {
 
     private func play(packet: [UInt8]) {
         lock.lock()
-        guard let decoder else { lock.unlock(); return }
+        guard let decoder else {
+            lock.unlock()
+            return
+        }
         let channels = self.channels
         var skip = self.preSkip
         self.preSkip = 0
@@ -160,7 +177,7 @@ public final class AudioSession: AudioSink {
 
         ensureFormat(channels: channels)
         guard engine.isRunning, let format,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(usable))
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(usable))
         else { return }
         buffer.frameLength = AVAudioFrameCount(usable)
         if let data = buffer.floatChannelData {
@@ -177,7 +194,9 @@ public final class AudioSession: AudioSink {
         let played = frameCount
         lock.unlock()
         if played % 100 == 0 {
-            lock.lock(); let plc = concealed; lock.unlock()
+            lock.lock()
+            let plc = concealed
+            lock.unlock()
             log("viewer: \(played) opus frames played, \(plc) concealed")
         }
     }

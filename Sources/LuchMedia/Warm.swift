@@ -14,21 +14,25 @@ public enum WarmFilter {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         guard let luma = CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
-              let chroma = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) else { return }
-        apply(luma: luma,
-              lumaWidth: CVPixelBufferGetWidthOfPlane(buffer, 0),
-              lumaStride: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0),
-              chroma: chroma,
-              chromaWidth: CVPixelBufferGetWidthOfPlane(buffer, 1),
-              chromaHeight: CVPixelBufferGetHeightOfPlane(buffer, 1),
-              chromaStride: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1),
-              strength: strength)
+            let chroma = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)
+        else { return }
+        apply(
+            luma: luma,
+            lumaWidth: CVPixelBufferGetWidthOfPlane(buffer, 0),
+            lumaStride: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0),
+            chroma: chroma,
+            chromaWidth: CVPixelBufferGetWidthOfPlane(buffer, 1),
+            chromaHeight: CVPixelBufferGetHeightOfPlane(buffer, 1),
+            chromaStride: CVPixelBufferGetBytesPerRowOfPlane(buffer, 1),
+            strength: strength)
     }
 
     /// Byte-level pass, exposed for tests and for callers that already hold the planes.
-    public static func apply(luma: UnsafeMutableRawPointer, lumaWidth: Int, lumaStride: Int,
-                             chroma: UnsafeMutableRawPointer, chromaWidth: Int, chromaHeight: Int,
-                             chromaStride: Int, strength: Double) {
+    public static func apply(
+        luma: UnsafeMutableRawPointer, lumaWidth: Int, lumaStride: Int,
+        chroma: UnsafeMutableRawPointer, chromaWidth: Int, chromaHeight: Int,
+        chromaStride: Int, strength: Double
+    ) {
         let s = Float(min(1, max(0, strength)))
         let cbShift = -12 * s
         let crShift = 8 * s

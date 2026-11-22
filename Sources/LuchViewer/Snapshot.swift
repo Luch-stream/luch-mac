@@ -18,11 +18,14 @@ final class Snapshot {
         if format == nil || CMFormatDescriptionEqual(format, otherFormatDescription: description) == false {
             session = nil
             format = description
-            let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-            VTDecompressionSessionCreate(allocator: nil, formatDescription: description,
-                                         decoderSpecification: nil,
-                                         imageBufferAttributes: attributes as CFDictionary,
-                                         outputCallback: nil, decompressionSessionOut: &session)
+            let attributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            VTDecompressionSessionCreate(
+                allocator: nil, formatDescription: description,
+                decoderSpecification: nil,
+                imageBufferAttributes: attributes as CFDictionary,
+                outputCallback: nil, decompressionSessionOut: &session)
         }
         guard let session else { return }
         seen += 1

@@ -142,16 +142,24 @@ final class ControlServer {
     func stop() {
         running = false
         endSession()
-        if listenFD >= 0 { Darwin.close(listenFD); listenFD = -1 }
-        if let ref = registerRef { DNSServiceRefDeallocate(ref); registerRef = nil }
+        if listenFD >= 0 {
+            Darwin.close(listenFD)
+            listenFD = -1
+        }
+        if let ref = registerRef {
+            DNSServiceRefDeallocate(ref)
+            registerRef = nil
+        }
     }
 
     // MARK: - discovery
 
     private func advertise(port: UInt16) {
         var txt: [UInt8] = []
-        let entries = ["v=\(LuchProto.Proto.version)", "id=\(id)", "name=\(name)", "model=\(ReceiveCaps.model())",
-                       "dec=\(VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC) ? "hevc,avc" : "avc")"]
+        let entries = [
+            "v=\(LuchProto.Proto.version)", "id=\(id)", "name=\(name)", "model=\(ReceiveCaps.model())",
+            "dec=\(VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC) ? "hevc,avc" : "avc")",
+        ]
         for entry in entries {
             let bytes = Array(entry.utf8)
             txt.append(UInt8(bytes.count))
@@ -159,13 +167,14 @@ final class ControlServer {
         }
         let context = Unmanaged.passUnretained(self).toOpaque()
         let error = txt.withUnsafeBufferPointer { buffer in
-            DNSServiceRegister(&registerRef, 0, 0, name, Proto.receiverType, nil, nil,
-                               port.bigEndian, UInt16(buffer.count), buffer.baseAddress,
-                               { _, flags, err, regName, regType, _, ctx in
-                                   let text = regName.map { String(cString: $0) } ?? "?"
-                                   let kind = regType.map { String(cString: $0) } ?? "?"
-                                   log("viewer: bonjour reply err=\(err) name=\(text) type=\(kind) ctx=\(ctx != nil)")
-                               }, context)
+            DNSServiceRegister(
+                &registerRef, 0, 0, name, Proto.receiverType, nil, nil,
+                port.bigEndian, UInt16(buffer.count), buffer.baseAddress,
+                { _, flags, err, regName, regType, _, ctx in
+                    let text = regName.map { String(cString: $0) } ?? "?"
+                    let kind = regType.map { String(cString: $0) } ?? "?"
+                    log("viewer: bonjour reply err=\(err) name=\(text) type=\(kind) ctx=\(ctx != nil)")
+                }, context)
         }
         if error != kDNSServiceErr_NoError {
             log("viewer: bonjour register failed: \(error)")
@@ -208,7 +217,10 @@ final class ControlServer {
                 pending.removeSubrange(pending.startIndex...newline)
                 guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any]
                 else { continue }
-                if !handle(object, control) { control.close(); return }
+                if !handle(object, control) {
+                    control.close()
+                    return
+                }
             }
         }
         if current === control { endSession() }
@@ -232,14 +244,17 @@ final class ControlServer {
             let fps = (video["fps"] as? NSNumber)?.intValue ?? 60
             endSession()
             do {
-                let session = try VideoSession(width: width, height: height, fps: fps,
-                                               codec: codecText == "video/hevc" ? .hevc : .avc, sink: sink)
+                let session = try VideoSession(
+                    width: width, height: height, fps: fps,
+                    codec: codecText == "video/hevc" ? .hevc : .avc, sink: sink)
                 session.onNeedsKeyframe = { [weak control] in control?.send(["t": "keyframe"]) }
                 self.session = session
                 self.current = control
                 control.mirroredID = message["mode"] as? String
-                control.send(["t": "ready", "video_port": Int(session.videoPort),
-                              "audio_port": Int(session.audioPort)])
+                control.send([
+                    "t": "ready", "video_port": Int(session.videoPort),
+                    "audio_port": Int(session.audioPort),
+                ])
                 session.start()
                 if session.audioSocket >= 0, let audio = owner?.makeAudio?(session.audioSocket) {
                     audio.start()
@@ -306,9 +321,11 @@ final class ControlServer {
                     // Remember what this Mac really measured, so the next welcome carries a benchmark.
                     UserDefaults.standard.set(stats.decodeMs, forKey: "decode.\(session.codecMime)")
                 }
-                control.send(["t": "stats", "decode_ms": (stats.decodeMs * 10).rounded() / 10,
-                              "fps": Int(stats.fps), "lost": stats.lost, "dropped": stats.dropped,
-                              "decoder": stats.decoder])
+                control.send([
+                    "t": "stats", "decode_ms": (stats.decodeMs * 10).rounded() / 10,
+                    "fps": Int(stats.fps), "lost": stats.lost, "dropped": stats.dropped,
+                    "decoder": stats.decoder,
+                ])
             }
             self?.statsThread = nil
         }

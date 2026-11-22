@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Darwin
 import Foundation
-import dnssd
 import LuchProto
+import dnssd
 
 public struct Receiver {
     public var id: String
@@ -16,8 +16,10 @@ public struct Receiver {
     public var port: UInt16
     public var service: String
 
-    public init(id: String, name: String, model: String, address: String, interfaceName: String,
-                interfaceIndex: UInt32, port: UInt16, service: String) {
+    public init(
+        id: String, name: String, model: String, address: String, interfaceName: String,
+        interfaceIndex: UInt32, port: UInt16, service: String
+    ) {
         self.id = id
         self.name = name
         self.model = model
@@ -56,8 +58,9 @@ private func interfaceName(_ index: UInt32) -> String {
 
 /// IPv4 address of a `.local.` host target, resolved through the system resolver (mDNS included).
 private func resolveIPv4(_ host: String) -> String? {
-    var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM, ai_protocol: 0,
-                         ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+    var hints = addrinfo(
+        ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM, ai_protocol: 0,
+        ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
     var res: UnsafeMutablePointer<addrinfo>?
     guard getaddrinfo(host, nil, &hints, &res) == 0, let first = res else { return nil }
     defer { freeaddrinfo(res) }
@@ -65,7 +68,10 @@ private func resolveIPv4(_ host: String) -> String? {
     var cur: UnsafeMutablePointer<addrinfo>? = first
     while let ai = cur {
         if ai.pointee.ai_family == AF_INET,
-           getnameinfo(ai.pointee.ai_addr, ai.pointee.ai_addrlen, &addr, socklen_t(addr.count), nil, 0, NI_NUMERICHOST) == 0 {
+            getnameinfo(
+                ai.pointee.ai_addr, ai.pointee.ai_addrlen, &addr, socklen_t(addr.count), nil, 0,
+                NI_NUMERICHOST) == 0
+        {
             return String(cString: addr)
         }
         cur = ai.pointee.ai_next
@@ -100,11 +106,13 @@ private let browseCallback: DNSServiceBrowseReply = { _, flags, ifIndex, err, na
     discovery.handleBrowse(flags: flags, ifIndex: ifIndex, error: err, name: name)
 }
 
-private let resolveCallback: DNSServiceResolveReply = { _, _, ifIndex, err, fullname, host, port, txtLen, txt, ctx in
+private let resolveCallback: DNSServiceResolveReply = {
+    _, _, ifIndex, err, fullname, host, port, txtLen, txt, ctx in
     guard let ctx else { return }
     let discovery = Unmanaged<Discovery>.fromOpaque(ctx).takeUnretainedValue()
-    discovery.handleResolve(ifIndex: ifIndex, error: err, fullname: fullname, host: host,
-                            port: port, txtLen: txtLen, txt: txt)
+    discovery.handleResolve(
+        ifIndex: ifIndex, error: err, fullname: fullname, host: host,
+        port: port, txtLen: txtLen, txt: txt)
 }
 
 private let registerCallback: DNSServiceRegisterReply = { _, _, err, name, _, _, ctx in
@@ -119,7 +127,7 @@ private let registerCallback: DNSServiceRegisterReply = { _, _, err, name, _, _,
 
 public final class Discovery {
     public var onUpdate: (() -> Void)?
-    public private(set) var receivers: [String: Receiver] = [:] // service instance name -> receiver
+    public private(set) var receivers: [String: Receiver] = [:]  // service instance name -> receiver
     public var published = false
 
     private var browserRef: DNSServiceRef?
@@ -152,9 +160,10 @@ public final class Discovery {
         }
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         let err = txt.withUnsafeBufferPointer { buf in
-            DNSServiceRegister(&registerRef, 0, 0, name, Proto.senderType, nil, nil,
-                               UInt16(9).bigEndian, UInt16(buf.count), buf.baseAddress,
-                               registerCallback, ctx)
+            DNSServiceRegister(
+                &registerRef, 0, 0, name, Proto.senderType, nil, nil,
+                UInt16(9).bigEndian, UInt16(buf.count), buf.baseAddress,
+                registerCallback, ctx)
         }
         if err != kDNSServiceErr_NoError {
             log("bonjour: register \(Proto.senderType) failed: \(err)")
@@ -177,8 +186,10 @@ public final class Discovery {
         }
     }
 
-    fileprivate func handleBrowse(flags: DNSServiceFlags, ifIndex: UInt32, error: DNSServiceErrorType,
-                                  name: UnsafePointer<CChar>?) {
+    fileprivate func handleBrowse(
+        flags: DNSServiceFlags, ifIndex: UInt32, error: DNSServiceErrorType,
+        name: UnsafePointer<CChar>?
+    ) {
         guard error == kDNSServiceErr_NoError, let name else { return }
         let service = String(cString: name)
         log("bonjour: browse event flags=\(flags) \(service) if=\(ifIndex)")
@@ -198,8 +209,9 @@ public final class Discovery {
     private func resolve(_ service: String, ifIndex: UInt32) {
         var ref: DNSServiceRef?
         let type = Proto.receiverType
-        let err = DNSServiceResolve(&ref, 0, ifIndex, service, type, "local.", resolveCallback,
-                                    Unmanaged.passUnretained(self).toOpaque())
+        let err = DNSServiceResolve(
+            &ref, 0, ifIndex, service, type, "local.", resolveCallback,
+            Unmanaged.passUnretained(self).toOpaque())
         guard err == kDNSServiceErr_NoError, let ref else {
             log("bonjour: resolve \(service) failed: \(err)")
             return
@@ -210,15 +222,18 @@ public final class Discovery {
         process(ref)
     }
 
-    fileprivate func handleResolve(ifIndex: UInt32, error: DNSServiceErrorType, fullname: UnsafePointer<CChar>?,
-                                   host: UnsafePointer<CChar>?, port: UInt16, txtLen: UInt16, txt: UnsafeRawPointer?) {
+    fileprivate func handleResolve(
+        ifIndex: UInt32, error: DNSServiceErrorType, fullname: UnsafePointer<CChar>?,
+        host: UnsafePointer<CChar>?, port: UInt16, txtLen: UInt16, txt: UnsafeRawPointer?
+    ) {
         guard error == kDNSServiceErr_NoError, let fullname, let host else { return }
         let txt = txtMap(txt, length: txtLen)
         if let v = txt["v"], v != "0" {
             log("bonjour: ignoring \(String(cString: fullname)): protocol v\(v)")
             return
         }
-        let serviceName = txt["service"] ?? String(cString: fullname).components(separatedBy: "._luch").first ?? ""
+        let serviceName =
+            txt["service"] ?? String(cString: fullname).components(separatedBy: "._luch").first ?? ""
         let hostTarget = String(cString: host)
         let portHost = UInt16(bigEndian: port)
         // getaddrinfo can hit the network (mDNS): keep it off the DNS-SD callback thread.
@@ -234,14 +249,17 @@ public final class Discovery {
             if address.hasPrefix("127.") {
                 index = if_nametoindex("lo0")
             }
-            let receiver = Receiver(id: txt["id"] ?? serviceName, name: txt["name"] ?? serviceName,
-                                    model: txt["model"] ?? "", address: address,
-                                    interfaceName: interfaceName(index), interfaceIndex: index,
-                                    port: portHost, service: serviceName)
+            let receiver = Receiver(
+                id: txt["id"] ?? serviceName, name: txt["name"] ?? serviceName,
+                model: txt["model"] ?? "", address: address,
+                interfaceName: interfaceName(index), interfaceIndex: index,
+                port: portHost, service: serviceName)
             self.lock.lock()
             self.receivers[receiver.service] = receiver
             self.lock.unlock()
-            log("bonjour: found \(receiver.name) id=\(receiver.id) \(receiver.address):\(receiver.port) via \(receiver.interfaceName)(\(receiver.interfaceIndex))")
+            log(
+                "bonjour: found \(receiver.name) id=\(receiver.id) \(receiver.address):\(receiver.port) via \(receiver.interfaceName)(\(receiver.interfaceIndex))"
+            )
             self.onUpdate?()
         }
     }
@@ -259,13 +277,15 @@ public final class Discovery {
         while Date() < deadline {
             let list = all()
             if let match {
-                if let hit = list.first(where: { $0.name.localizedCaseInsensitiveContains(match) || $0.id == match || $0.address == match }) {
+                if let hit = list.first(where: {
+                    $0.name.localizedCaseInsensitiveContains(match) || $0.id == match || $0.address == match
+                }) {
                     return hit
                 }
             } else if list.count == 1 {
                 return list[0]
             } else if list.count > 1 {
-                return nil // ambiguous without a name
+                return nil  // ambiguous without a name
             }
             usleep(100_000)
         }

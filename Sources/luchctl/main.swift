@@ -47,7 +47,7 @@ case "mirror":
             index += 2
             continue
         }
-        if (args[index] == "--preset" || args[index] == "--quality"), index + 1 < args.count {
+        if args[index] == "--preset" || args[index] == "--quality", index + 1 < args.count {
             request["preset"] = args[index + 1]
             index += 2
             continue
@@ -74,21 +74,26 @@ case "mirror":
     }
     if let name = positionals.first { request["name"] = name }
     let response = call(request)
-    if let error = response["error"] as? String { print("error: \(error)"); exit(1) }
+    if let error = response["error"] as? String {
+        print("error: \(error)")
+        exit(1)
+    }
     print("mirroring to \(response["receiver"] as? String ?? "?")")
 
 case "stats":
     let response = call(["cmd": "stats"])
     let stats = response["stats"] as? [String: Any] ?? [:]
-    if stats.isEmpty { print("not streaming") }
-    else {
+    if stats.isEmpty {
+        print("not streaming")
+    } else {
         let est = (stats["est_ms"] as? NSNumber)?.doubleValue ?? 0
         let host = (stats["host_ms"] as? NSNumber)?.doubleValue ?? 0
         let rtt = (stats["rtt_ms"] as? NSNumber)?.doubleValue ?? 0
         let decode = (stats["decode_ms"] as? NSNumber)?.doubleValue
         let fps = (stats["fps"] as? NSNumber)?.doubleValue ?? 0
         let mbps = (stats["mbps"] as? NSNumber)?.doubleValue ?? 0
-        var line = String(format: "≈ %.0f ms · host %.1f · rtt %.1f · %.0f fps · %.1f Mbit/s", est, host, rtt, fps, mbps)
+        var line = String(
+            format: "≈ %.0f ms · host %.1f · rtt %.1f · %.0f fps · %.1f Mbit/s", est, host, rtt, fps, mbps)
         if let decode { line += String(format: " · decode %.1f", decode) }
         if let battery = (stats["battery"] as? NSNumber)?.intValue {
             line += " · phone \(battery)%"
@@ -103,7 +108,9 @@ case "stats":
 
 case "state":
     let response = call(["cmd": "state"])
-    print("state: \(response["state"] as? String ?? "?"), streaming: \((response["streaming"] as? Bool) == true)")
+    print(
+        "state: \(response["state"] as? String ?? "?"), streaming: \((response["streaming"] as? Bool) == true)"
+    )
 
 case "warmth":
     guard args.count > 1, let value = Double(args[1]) else {
@@ -111,12 +118,18 @@ case "warmth":
         exit(2)
     }
     let response = call(["cmd": "warmth", "value": value])
-    if let error = response["error"] as? String { print("error: \(error)"); exit(1) }
+    if let error = response["error"] as? String {
+        print("error: \(error)")
+        exit(1)
+    }
     print(String(format: "warmth: %.2f", (response["warmth"] as? NSNumber)?.doubleValue ?? value))
 
 case "stop":
     let response = call(["cmd": "stop"])
-    if let error = response["error"] as? String { print("error: \(error)"); exit(1) }
+    if let error = response["error"] as? String {
+        print("error: \(error)")
+        exit(1)
+    }
     print("stopped")
 
 case "ping":
@@ -124,9 +137,10 @@ case "ping":
     print((response["ok"] as? Bool) == true ? "app is running" : "no response")
 
 default:
-    print("""
-    usage: luchctl list | mirror [name] [--codec auto|h264|hevc] [--profile baseline|main|high]
-                          [--frame-ms N] | stats | state | stop | ping
-    """)
+    print(
+        """
+        usage: luchctl list | mirror [name] [--codec auto|h264|hevc] [--profile baseline|main|high]
+                              [--frame-ms N] | stats | state | stop | ping
+        """)
     exit(2)
 }

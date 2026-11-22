@@ -9,9 +9,10 @@ public enum SyntheticFrame {
     public static func make(width: Int, height: Int, index: Int) -> CVPixelBuffer? {
         var buffer: CVPixelBuffer?
         let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
-        let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height,
-                                         kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-                                         attrs as CFDictionary, &buffer)
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault, width, height,
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            attrs as CFDictionary, &buffer)
         guard status == kCVReturnSuccess, let buffer else { return nil }
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }

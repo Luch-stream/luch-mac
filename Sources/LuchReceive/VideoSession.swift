@@ -103,15 +103,21 @@ public final class VideoSession {
     }
 
     public func start() {
-        onNeedsKeyframe?()   // the sender should start with an IDR
+        onNeedsKeyframe?()  // the sender should start with an IDR
         Thread.detachNewThread { [weak self] in self?.readLoop() }
     }
 
     public func stop() {
         running = false
         decoder.reset()
-        if videoFD >= 0 { close(videoFD); videoFD = -1 }
-        if audioFD >= 0 { close(audioFD); audioFD = -1 }
+        if videoFD >= 0 {
+            close(videoFD)
+            videoFD = -1
+        }
+        if audioFD >= 0 {
+            close(audioFD)
+            audioFD = -1
+        }
     }
 
     // MARK: - sockets
@@ -130,7 +136,10 @@ public final class VideoSession {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bound == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
+        guard bound == 0 else {
+            close(fd)
+            throw POSIXError(.EADDRINUSE)
+        }
         var actual = sockaddr_in()
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         let named = withUnsafeMutablePointer(to: &actual) { pointer in
@@ -138,7 +147,10 @@ public final class VideoSession {
                 getsockname(fd, $0, &length)
             }
         }
-        guard named == 0 else { close(fd); throw POSIXError(.EIO) }
+        guard named == 0 else {
+            close(fd)
+            throw POSIXError(.EIO)
+        }
         return (fd, actual.sin_port.bigEndian)
     }
 
@@ -189,7 +201,9 @@ public final class VideoSession {
     }
 
     private func incomplete() {
-        lock.lock(); lostCount += 1; lock.unlock()
+        lock.lock()
+        lostCount += 1
+        lock.unlock()
         buffer = []
         if !needKeyframe {
             needKeyframe = true
@@ -204,7 +218,9 @@ public final class VideoSession {
         let isIDR = frameIsIDR
         let started = frameStart
         if needKeyframe && !isIDR {
-            lock.lock(); droppedCount += 1; lock.unlock()
+            lock.lock()
+            droppedCount += 1
+            lock.unlock()
 
             return
         }
@@ -216,11 +232,16 @@ public final class VideoSession {
             }
         }
         guard let format,
-              let sampleBuffer = AnnexB.sampleBuffer(sample, format: format,
-                                                     pts: CMTime(value: CMTimeValue(DispatchTime.now().uptimeNanoseconds / 1000),
-                                                                 timescale: 1_000_000),
-                                                     timescale: CMTimeScale(max(1, fps))) else {
-            lock.lock(); droppedCount += 1; lock.unlock()
+            let sampleBuffer = AnnexB.sampleBuffer(
+                sample, format: format,
+                pts: CMTime(
+                    value: CMTimeValue(DispatchTime.now().uptimeNanoseconds / 1000),
+                    timescale: 1_000_000),
+                timescale: CMTimeScale(max(1, fps)))
+        else {
+            lock.lock()
+            droppedCount += 1
+            lock.unlock()
             return
         }
         decoder.decode(sampleBuffer, format: format)

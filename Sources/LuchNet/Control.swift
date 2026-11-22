@@ -27,7 +27,9 @@ public final class ControlChannel {
     }
 
     /// Connects to the receiver, pinning the socket to the interface it was discovered on.
-    public static func open(ip: String, port: UInt16, interfaceIndex: UInt32, timeout: TimeInterval = 5) -> ControlChannel? {
+    public static func open(ip: String, port: UInt16, interfaceIndex: UInt32, timeout: TimeInterval = 5)
+        -> ControlChannel?
+    {
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else {
             log("control: socket() failed: \(errnoString())")
@@ -113,7 +115,8 @@ public final class ControlChannel {
     @discardableResult
     public func send(_ obj: [String: Any]) -> Bool {
         guard JSONSerialization.isValidJSONObject(obj),
-              var data = try? JSONSerialization.data(withJSONObject: obj) else {
+            var data = try? JSONSerialization.data(withJSONObject: obj)
+        else {
             log("control: cannot encode \(obj)")
             return false
         }
@@ -163,7 +166,8 @@ public final class ControlChannel {
                     pending.removeSubrange(pending.startIndex...nl)
                     guard !line.isEmpty else { continue }
                     guard let obj = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
-                          let t = obj["t"] as? String else {
+                        let t = obj["t"] as? String
+                    else {
                         log("control: bad line")
                         continue
                     }

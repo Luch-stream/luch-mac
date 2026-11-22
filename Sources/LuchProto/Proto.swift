@@ -32,14 +32,16 @@ public enum Proto {
     public static let app = "luch/0.1 (macos)"
 
     /// 24-byte big-endian datagram header.
-    public static func header(kind: MediaKind, flags: PacketFlags, shard: UInt16, shards: UInt16,
-                              seq: UInt32, ptsUS: UInt32, frameLen: UInt32, hostLat: UInt16) -> [UInt8] {
+    public static func header(
+        kind: MediaKind, flags: PacketFlags, shard: UInt16, shards: UInt16,
+        seq: UInt32, ptsUS: UInt32, frameLen: UInt32, hostLat: UInt16
+    ) -> [UInt8] {
         var h = [UInt8](repeating: 0, count: headerSize)
         h[0] = kind.rawValue
         h[1] = flags.rawValue
         h.putBE16(2, shard)
         h.putBE16(4, shards)
-        h.putBE16(6, 0) // parity shards: no FEC yet
+        h.putBE16(6, 0)  // parity shards: no FEC yet
         h.putBE32(8, seq)
         h.putBE32(12, ptsUS)
         h.putBE32(16, frameLen)
@@ -65,14 +67,14 @@ public enum Proto {
     public static func opusHead(preSkip: UInt16 = 312) -> [UInt8] {
         var h = [UInt8](repeating: 0, count: 19)
         h.replaceSubrange(0..<8, with: Array("OpusHead".utf8))
-        h[8] = 1 // version
-        h[9] = 2 // channels
+        h[8] = 1  // version
+        h[9] = 2  // channels
         let ps = preSkip.littleEndian
         h[10] = UInt8(ps & 0xff)
         h[11] = UInt8(ps >> 8)
         h.putLE32(12, 48_000)
-        h.putLE16(16, 0) // output gain
-        h[18] = 0        // channel mapping family
+        h.putLE16(16, 0)  // output gain
+        h[18] = 0  // channel mapping family
         return h
     }
 }

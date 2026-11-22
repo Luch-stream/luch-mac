@@ -3,11 +3,11 @@
 import AppKit
 import CoreGraphics
 import LuchEngine
-import ScreenCaptureKit
 import LuchLocal
 import LuchMedia
 import LuchNet
 import LuchProto
+import ScreenCaptureKit
 import ServiceManagement
 
 final class Preferences {
@@ -51,8 +51,11 @@ final class Preferences {
     var display: Int? {
         get { (defaults.object(forKey: "display") as? NSNumber)?.intValue }
         set {
-            if let newValue { defaults.set(newValue, forKey: "display") }
-            else { defaults.removeObject(forKey: "display") }
+            if let newValue {
+                defaults.set(newValue, forKey: "display")
+            } else {
+                defaults.removeObject(forKey: "display")
+            }
         }
     }
 
@@ -138,14 +141,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotApplied = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        logFile = Bundle.main.bundleURL.deletingLastPathComponent()
+        logFile =
+            Bundle.main.bundleURL.deletingLastPathComponent()
             .appendingPathComponent("luch-app.log").path
         log("app: launched, bundle \(Bundle.main.bundleURL.lastPathComponent)")
 
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "dot.radiowaves.left.and.right",
-                                           accessibilityDescription: "Luch")
+        statusItem.button?.image = NSImage(
+            systemSymbolName: "dot.radiowaves.left.and.right",
+            accessibilityDescription: "Luch")
         statusItem.button?.toolTip = "Luch"
         statusItem.menu = menu
 
@@ -193,48 +198,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "ping":
             return ["ok": true]
         case "receivers":
-            return ["receivers": receivers.map { receiver in
-                ["id": receiver.id, "name": receiver.name, "model": receiver.model,
-                 "address": receiver.address, "iface": receiver.interfaceName,
-                 "port": Int(receiver.port),
-                 "mirroring": engine != nil && currentReceiverID == receiver.id]
-            }]
+            return [
+                "receivers": receivers.map { receiver in
+                    [
+                        "id": receiver.id, "name": receiver.name, "model": receiver.model,
+                        "address": receiver.address, "iface": receiver.interfaceName,
+                        "port": Int(receiver.port),
+                        "mirroring": engine != nil && currentReceiverID == receiver.id,
+                    ]
+                }
+            ]
         case "state":
             return ["state": state, "streaming": engine != nil, "stats": statsDictionary()]
         case "stats":
             return ["stats": statsDictionary()]
         case "mirror":
             if let frameMs = (request["frame_ms"] as? NSNumber)?.intValue { frameMsOverride = frameMs }
-        if let codec = request["codec"] as? String, let value = CodecChoice(rawValue: codec) {
-            codecOverride = value
-        }
-        if let mode = request["size_mode"] as? String, let value = SizeMode(rawValue: mode) {
-            sizeModeOverride = value
-        }
-        if let preset = request["preset"] as? String, let value = QualityPreset.parse(preset) {
-            presetOverride = value
-        }
-        if let text = request["audio_bitrate"] as? String, let kbps = Int(text) {
-            audioBitrateOverride = kbps * 1000
-        }
-        if let profile = request["profile"] as? String, let value = VideoProfile(rawValue: profile) {
-            self.profileOverride = value
-        }
+            if let codec = request["codec"] as? String, let value = CodecChoice(rawValue: codec) {
+                codecOverride = value
+            }
+            if let mode = request["size_mode"] as? String, let value = SizeMode(rawValue: mode) {
+                sizeModeOverride = value
+            }
+            if let preset = request["preset"] as? String, let value = QualityPreset.parse(preset) {
+                presetOverride = value
+            }
+            if let text = request["audio_bitrate"] as? String, let kbps = Int(text) {
+                audioBitrateOverride = kbps * 1000
+            }
+            if let profile = request["profile"] as? String, let value = VideoProfile(rawValue: profile) {
+                self.profileOverride = value
+            }
             let wanted = (request["id"] as? String) ?? (request["name"] as? String)
             // Address too: two receivers can share a display name (the Mac viewer and a phone).
-            let match = receivers.first { $0.id == wanted || $0.name == wanted || $0.address == wanted }
+            let match =
+                receivers.first { $0.id == wanted || $0.name == wanted || $0.address == wanted }
                 ?? (receivers.count == 1 ? receivers[0] : nil)
             guard let receiver = match else { return ["error": "receiver not found"] }
             startMirror(receiver)
             return ["ok": true, "receiver": receiver.name]
         case "warmth":
             let value: Double
-            if let number = request["value"] as? NSNumber { value = number.doubleValue }
-            else if let text = request["value"] as? String, let parsed = Double(text) { value = parsed }
-            else { return ["error": "warmth expects a number 0...1"] }
+            if let number = request["value"] as? NSNumber {
+                value = number.doubleValue
+            } else if let text = request["value"] as? String, let parsed = Double(text) {
+                value = parsed
+            } else {
+                return ["error": "warmth expects a number 0...1"]
+            }
             let warmth = min(1, max(0, value))
             Preferences.shared.warmth = warmth
-            engine?.warmth = warmth     // live: the next frame is already warmer
+            engine?.warmth = warmth  // live: the next frame is already warmer
             rebuildMenu()
             return ["ok": true, "warmth": warmth]
         case "stop":
@@ -247,14 +261,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func statsDictionary() -> [String: Any] {
         guard let stats = engine?.lastStats else { return [:] }
-        var out: [String: Any] = ["est_ms": stats.estMs, "host_ms": stats.hostMs,
-                                  "rtt_ms": stats.rttMs, "fps": stats.fps, "mbps": stats.mbps,
-                                  "audio": stats.audioPackets]
+        var out: [String: Any] = [
+            "est_ms": stats.estMs, "host_ms": stats.hostMs,
+            "rtt_ms": stats.rttMs, "fps": stats.fps, "mbps": stats.mbps,
+            "audio": stats.audioPackets,
+        ]
         if let decode = stats.decodeMs { out["decode_ms"] = decode }
         if let battery = stats.battery { out["battery"] = battery }
         if let charging = stats.charging { out["charging"] = charging }
         if let thermal = stats.thermal { out["thermal"] = thermal }
-        if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat { out["thermal_headroom"] = headroom }
+        if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat {
+            out["thermal_headroom"] = headroom
+        }
         return out
     }
 
@@ -276,7 +294,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (index, receiver) in receivers.enumerated() {
             let item = NSMenuItem(title: receiver.name, action: nil, keyEquivalent: "")
             let submenu = NSMenu()
-            let mirror = NSMenuItem(title: "Mirror Screen", action: #selector(mirrorScreen(_:)), keyEquivalent: "")
+            let mirror = NSMenuItem(
+                title: "Mirror Screen", action: #selector(mirrorScreen(_:)), keyEquivalent: "")
             mirror.target = self
             mirror.representedObject = index
             submenu.addItem(mirror)
@@ -316,8 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for preset in QualityPreset.allCases {
             let onBattery = engine?.deviceOnBattery ?? false
             let hint = onBattery && preset != .low ? " — drains the battery faster" : ""
-            let item = NSMenuItem(title: "   " + preset.label + hint,
-                                  action: #selector(setPreset(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   " + preset.label + hint,
+                action: #selector(setPreset(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = preset.rawValue
             item.state = Preferences.shared.preset == preset.rawValue ? .on : .off
@@ -327,8 +347,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoMenu.addItem(.separator())
         videoMenu.addItem(header("Size"))
         for mode in SizeMode.allCases {
-            let item = NSMenuItem(title: "   " + mode.rawValue.capitalized,
-                                  action: #selector(setSizeMode(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   " + mode.rawValue.capitalized,
+                action: #selector(setSizeMode(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
             item.state = Preferences.shared.sizeMode == mode.rawValue ? .on : .off
@@ -359,8 +380,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoAuto.state = Preferences.shared.bitrate == 0 ? .on : .off
         videoMenu.addItem(videoAuto)
         for kbps in [10_000, 20_000, 30_000] {
-            let item = NSMenuItem(title: "   \(kbps / 1000) Mbit/s",
-                                  action: #selector(setBitrate(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   \(kbps / 1000) Mbit/s",
+                action: #selector(setBitrate(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = kbps
             item.state = Preferences.shared.bitrate == kbps ? .on : .off
@@ -371,14 +393,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Same shape as the other groups: a header, then the slider row itself.
         videoMenu.addItem(header("Warm picture"))
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
-        let slider = NSSlider(value: Preferences.shared.warmth, minValue: 0, maxValue: 1, target: self,
-                              action: #selector(warmthChanged(_:)))
+        let slider = NSSlider(
+            value: Preferences.shared.warmth, minValue: 0, maxValue: 1, target: self,
+            action: #selector(warmthChanged(_:)))
         slider.isContinuous = true
         slider.controlSize = .small
         slider.frame = NSRect(x: 30, y: 4, width: 186, height: 18)
         row.addSubview(slider)
 
-        let percent = NSTextField(labelWithString: String(format: "%d%%", Int((Preferences.shared.warmth * 100).rounded())))
+        let percent = NSTextField(
+            labelWithString: String(format: "%d%%", Int((Preferences.shared.warmth * 100).rounded())))
         percent.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         percent.textColor = .secondaryLabelColor
         percent.frame = NSRect(x: 222, y: 5, width: 32, height: 16)
@@ -397,8 +421,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.state = Preferences.shared.display == nil ? .on : .off
         videoMenu.addItem(main)
         for (index, screen) in NSScreen.screens.enumerated() {
-            let item = NSMenuItem(title: "   " + screen.localizedName,
-                                  action: #selector(setDisplay(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   " + screen.localizedName,
+                action: #selector(setDisplay(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = index
             item.state = Preferences.shared.display == index ? .on : .off
@@ -419,14 +444,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         audioGroupMenu.addItem(.separator())
         audioGroupMenu.addItem(header("Bitrate"))
-        let audioAuto = NSMenuItem(title: "   Auto", action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
+        let audioAuto = NSMenuItem(
+            title: "   Auto", action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
         audioAuto.target = self
         audioAuto.representedObject = 0
         audioAuto.state = Preferences.shared.audioBitrate == 0 ? .on : .off
         audioGroupMenu.addItem(audioAuto)
         for kbps in [64, 96, 128, 192] {
-            let item = NSMenuItem(title: "   \(kbps) kbit/s",
-                                  action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   \(kbps) kbit/s",
+                action: #selector(setAudioBitrate(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = kbps * 1000
             item.state = Preferences.shared.audioBitrate == kbps * 1000 ? .on : .off
@@ -436,7 +463,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioGroupMenu.addItem(.separator())
         audioGroupMenu.addItem(header("Frame size"))
         for ms in [10, 20] {
-            let item = NSMenuItem(title: "   \(ms) ms", action: #selector(setAudioFrameMs(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "   \(ms) ms", action: #selector(setAudioFrameMs(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = ms
             item.state = Preferences.shared.audioFrameMs == ms ? .on : .off
@@ -455,22 +483,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Receiver heat ▸
         let heat = NSMenuItem(title: "Receiver heat", action: nil, keyEquivalent: "")
         let heatMenu = NSMenu()
-        let auto = NSMenuItem(title: "Track receiver heat: Auto", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
+        let auto = NSMenuItem(
+            title: "Track receiver heat: Auto", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
         auto.target = self
         auto.representedObject = true
         auto.state = Preferences.shared.trackHeat ? .on : .off
         heatMenu.addItem(auto)
-        let off = NSMenuItem(title: "Track receiver heat: Off", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
+        let off = NSMenuItem(
+            title: "Track receiver heat: Off", action: #selector(setTrackHeat(_:)), keyEquivalent: "")
         off.target = self
         off.representedObject = false
         off.state = Preferences.shared.trackHeat ? .off : .on
         heatMenu.addItem(off)
 
         heatMenu.addItem(.separator())
-        for (value, label) in [("warn", "Warn only"), ("bitrate", "Lower bitrate"),
-                               ("quality", "Lower quality"), ("fps", "Lower fps"),
-                               ("both", "Bitrate + fps")] {
-            let item = NSMenuItem(title: "When hot: " + label, action: #selector(setHotPolicy(_:)), keyEquivalent: "")
+        for (value, label) in [
+            ("warn", "Warn only"), ("bitrate", "Lower bitrate"),
+            ("quality", "Lower quality"), ("fps", "Lower fps"),
+            ("both", "Bitrate + fps"),
+        ] {
+            let item = NSMenuItem(
+                title: "When hot: " + label, action: #selector(setHotPolicy(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = value
             item.state = Preferences.shared.hotPolicy == value ? .on : .off
@@ -478,7 +511,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         heatMenu.addItem(.separator())
-        let restore = NSMenuItem(title: "Restore quality when cool", action: #selector(toggleRestoreWhenCool), keyEquivalent: "")
+        let restore = NSMenuItem(
+            title: "Restore quality when cool", action: #selector(toggleRestoreWhenCool), keyEquivalent: "")
         restore.target = self
         restore.state = Preferences.shared.restoreWhenCool ? .on : .off
         heatMenu.addItem(restore)
@@ -488,7 +522,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let launch = NSMenuItem(title: "Mirror on launch", action: #selector(toggleMirrorOnLaunch), keyEquivalent: "")
+        let launch = NSMenuItem(
+            title: "Mirror on launch", action: #selector(toggleMirrorOnLaunch), keyEquivalent: "")
         launch.target = self
         launch.state = Preferences.shared.mirrorOnLaunch ? .on : .off
         menu.addItem(launch)
@@ -499,7 +534,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Luch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(
+            title: "Quit Luch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -520,8 +556,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let thermal = stats.thermal, thermal != "none" { line += " · \(thermal)" }
         if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat {
             // Warn, never throttle on its own: the user decides whether to drop the quality.
-            line += headroom < 0.3 ? String(format: " · 🔥 %.2f", headroom)
-                                   : String(format: " · 🌡%.2f", headroom)
+            line +=
+                headroom < 0.3
+                ? String(format: " · 🔥 %.2f", headroom)
+                : String(format: " · 🌡%.2f", headroom)
         }
         line += String(format: " · %.0f fps", stats.fps)
         if line != statsLine {
@@ -632,7 +670,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         options.display = Preferences.shared.display
         options.codec = codecOverride ?? (CodecChoice(rawValue: Preferences.shared.codec) ?? .auto)
         options.sizeMode = sizeModeOverride ?? (SizeMode(rawValue: Preferences.shared.sizeMode) ?? .fit)
-        options.preset = presetOverride ?? hotPreset ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
+        options.preset =
+            presetOverride ?? hotPreset ?? (QualityPreset.parse(Preferences.shared.preset) ?? .balanced)
         options.fps = fpsOverride ?? hotFps ?? Preferences.shared.fps
         options.audioBitrate = audioBitrateOverride ?? Preferences.shared.audioBitrate
         options.audioFrameMs = Preferences.shared.audioFrameMs
@@ -649,7 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         engine.onStopped = { [weak self] reason in
             DispatchQueue.main.async {
-                guard let self, self.engine == nil else { return } // replaced by a newer session
+                guard let self, self.engine == nil else { return }  // replaced by a newer session
                 self.currentReceiverID = nil
                 self.state = "Idle (\(reason))"
                 self.statsLine = "Not streaming"
@@ -692,8 +731,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let thermal = stats.thermal, thermal != "none" { line += " · \(thermal)" }
         if let headroom = stats.thermalHeadroom, Preferences.shared.trackHeat {
             // Warn, never throttle on its own: the user decides whether to drop the quality.
-            line += headroom < 0.3 ? String(format: " · 🔥 %.2f", headroom)
-                                   : String(format: " · 🌡%.2f", headroom)
+            line +=
+                headroom < 0.3
+                ? String(format: " · 🔥 %.2f", headroom)
+                : String(format: " · 🌡%.2f", headroom)
         }
         line += String(format: " · %.0f fps", stats.fps)
         statsLine = line
@@ -812,7 +853,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildMenu()
             return
         }
-        log("app: setting changed while streaming, restarting (engine=\(engine != nil), receiver=\(receiver.name))")
+        log(
+            "app: setting changed while streaming, restarting (engine=\(engine != nil), receiver=\(receiver.name))"
+        )
         startMirror(receiver)
     }
 

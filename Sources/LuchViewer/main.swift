@@ -1,7 +1,7 @@
+import AVFoundation
 // Luch Viewer — the Mac as a receiver: a window with the incoming picture and a menu bar item.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import AVFoundation
 import LuchAudio
 import LuchReceive
 
@@ -34,7 +34,8 @@ final class VideoView: NSView, VideoSink {
         if enqueued % 60 == 0 {
             let status = displayLayer.status.rawValue
             let error = displayLayer.error?.localizedDescription ?? "none"
-            FileHandle.standardError.write(Data("viewer: \(enqueued) samples, layer status \(status) (\(error))\n".utf8))
+            FileHandle.standardError.write(
+                Data("viewer: \(enqueued) samples, layer status \(status) (\(error))\n".utf8))
         }
         snapshot.maybeSave(sample)
         if displayLayer.status == .failed {
@@ -72,9 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         receiver.onStats = { [weak self] stats in
             DispatchQueue.main.async {
                 guard let label = self?.statsLabel else { return }
-                label.stringValue = String(format: "%@  %.0f fps · dec %.1f ms · lost %d · dropped %d",
-                                           label.isHidden ? "" : "", stats.fps, stats.decodeMs,
-                                           stats.lost, stats.dropped)
+                label.stringValue = String(
+                    format: "%@  %.0f fps · dec %.1f ms · lost %d · dropped %d",
+                    label.isHidden ? "" : "", stats.fps, stats.decodeMs,
+                    stats.lost, stats.dropped)
             }
         }
         receiver.onSession = { [weak self] sender in
@@ -113,9 +115,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statsLabel.isHidden = true
         container.addSubview(statsLabel)
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                          backing: .buffered, defer: false)
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
         window.title = "Luch — waiting for a sender"
         window.contentView = container
         window.backgroundColor = .black
@@ -151,12 +154,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statsItem.state = .off
         menu.addItem(statsItem)
 
-        let full = NSMenuItem(title: "Toggle full screen", action: #selector(toggleFullScreen), keyEquivalent: "f")
+        let full = NSMenuItem(
+            title: "Toggle full screen", action: #selector(toggleFullScreen), keyEquivalent: "f")
         full.target = self
         menu.addItem(full)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Luch Viewer", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(
+            title: "Quit Luch Viewer", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
         statusItem.menu = menu
     }
@@ -172,7 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             window.title = "Luch — waiting for a sender"
             statusItem.button?.title = "Luch"
-            statusItem.menu?.item(withTag: 1)?.title = receiver?.accepting == true ? "Waiting for a sender" : "Not accepting"
+            statusItem.menu?.item(withTag: 1)?.title =
+                receiver?.accepting == true ? "Waiting for a sender" : "Not accepting"
         }
     }
 

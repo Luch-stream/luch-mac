@@ -19,11 +19,15 @@ public enum CodecChoice: String, CaseIterable {
 /// for video (screen content, not camera) and a per-channel figure for Opus.
 public enum AutoBitrate {
     public static func videoKbps(width: Int, height: Int, fps: Int, codec: VideoCodec) -> Int {
-        // HEVC reaches the same quality with roughly a quarter fewer bits than H.264.
-        let bpp = codec == .hevc ? 0.10 : 0.13
-        let raw = Double(width * height * fps) * bpp / 1_000_000
-        let clamped = min(60.0, max(3.0, raw))
-        return Int((clamped * 2).rounded() / 2 * 1000)
+        // The same figure the Linux sender uses: 20 Mbit/s at 1080p60, growing with the square root
+        // of the pixel count (4K gets twice the 1080p rate, not four times). H.264 needs about a
+        // quarter more for the same picture; a lower frame rate needs proportionally fewer bits.
+        let base = 20_000.0
+        let pixels = Double(width * height) / (1920.0 * 1080.0)
+        let codecFactor = codec == .hevc ? 1.0 : 1.25
+        let fpsFactor = Double(max(1, fps)) / 60.0
+        let kbps = base * pixels.squareRoot() * codecFactor * fpsFactor
+        return Int((min(60_000.0, max(3_000.0, kbps)) / 1000).rounded() * 1000)
     }
 
     public static func audioBps(channels: Int, frameMs: Int) -> Int {
@@ -145,7 +149,7 @@ public enum EngineError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case let .cannotConnect(what): return "cannot connect: \(what)"
+        case .cannotConnect(let what): return "cannot connect: \(what)"
         case .noWelcome: return "receiver did not answer hello"
         case .noReady: return "receiver did not answer start"
         case .socket: return "cannot open the media socket"
@@ -178,10 +182,13 @@ public func ensureScreenRecording(wait: Bool) -> Bool {
 /// Stable sender identity, `~/Library/Application Support/Luch/id`.
 public func senderIdentity() -> (id: String, name: String) {
     let fm = FileManager.default
-    let dir = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Luch", isDirectory: true)
+    let dir = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+        "Library/Application Support/Luch", isDirectory: true)
     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     let file = dir.appendingPathComponent("id")
-    if let s = try? String(contentsOf: file, encoding: .utf8), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if let s = try? String(contentsOf: file, encoding: .utf8),
+        !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
         return (s.trimmingCharacters(in: .whitespacesAndNewlines), hostName())
     }
     let id = UUID().uuidString
@@ -197,8 +204,18 @@ public func hostName() -> String {
 final class Flag {
     private var value = false
     private let lock = NSLock()
-    func set() { lock.lock(); value = true; lock.unlock() }
-    func take() -> Bool { lock.lock(); defer { lock.unlock() }; let v = value; value = false; return v }
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+    func take() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let v = value
+        value = false
+        return v
+    }
 }
 
 public final class Engine {
@@ -266,14 +283,17 @@ public final class Engine {
         warmth = options.warmth
         let identity = senderIdentity()
 
-        guard let ctl = ControlChannel.open(ip: r.address, port: r.port, interfaceIndex: r.interfaceIndex) else {
+        guard let ctl = ControlChannel.open(ip: r.address, port: r.port, interfaceIndex: r.interfaceIndex)
+        else {
             throw EngineError.cannotConnect("\(r.address):\(r.port)")
         }
         control = ctl
         ctl.onEvent = { [weak self] msg in self?.handle(msg) }
 
-        ctl.send(["t": "hello", "v": Int(Proto.version), "id": identity.id, "name": identity.name,
-                  "app": Proto.app, "want": ["mirror"]])
+        ctl.send([
+            "t": "hello", "v": Int(Proto.version), "id": identity.id, "name": identity.name,
+            "app": Proto.app, "want": ["mirror"],
+        ])
         guard let welcome = ctl.waitFor("welcome", timeout: 5) else { throw EngineError.noWelcome }
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
         self.caps = caps
@@ -281,17 +301,25 @@ public final class Engine {
         let plan = CodecPlanner.plan(caps: caps, receiverID: r.id, options: options)
         self.plan = plan
         deviceOnBattery = caps.onBattery
-        log("plan: \(plan.codec.label) \(plan.width)x\(plan.height)@\(plan.fps) audio=\(plan.audio) — \(plan.reason)")
+        log(
+            "plan: \(plan.codec.label) \(plan.width)x\(plan.height)@\(plan.fps) audio=\(plan.audio) — \(plan.reason)"
+        )
 
-        var start: [String: Any] = ["t": "start", "mode": "mirror",
-                                    "video": ["codec": plan.codec.rawValue, "width": plan.width,
-                                              "height": plan.height, "fps": plan.fps,
-                                              // Ask the receiver to run the decoder at full operating rate:
-                                              // without it MediaCodec pipelines ~5 frames at 60 fps.
-                                              "operating_rate": true]]
+        var start: [String: Any] = [
+            "t": "start", "mode": "mirror",
+            "video": [
+                "codec": plan.codec.rawValue, "width": plan.width,
+                "height": plan.height, "fps": plan.fps,
+                // Ask the receiver to run the decoder at full operating rate:
+                // without it MediaCodec pipelines ~5 frames at 60 fps.
+                "operating_rate": true,
+            ],
+        ]
         if plan.audio {
-            start["audio"] = ["codec": "audio/opus", "rate": 48_000, "channels": 2,
-                              "frame_ms": options.audioFrameMs]
+            start["audio"] = [
+                "codec": "audio/opus", "rate": 48_000, "channels": 2,
+                "frame_ms": options.audioFrameMs,
+            ]
         }
         ctl.send(start)
         guard let ready = ctl.waitFor("ready", timeout: 5) else { throw EngineError.noReady }
@@ -300,34 +328,46 @@ public final class Engine {
         }
         log("ready: video port \(videoPort), audio port \(ready["audio_port"] ?? 0)")
 
-        guard let vtx = UdpSender.open(kind: .video, ip: r.address, port: videoPort,
-                                       interfaceIndex: r.interfaceIndex, dscp: 40) else {
+        guard
+            let vtx = UdpSender.open(
+                kind: .video, ip: r.address, port: videoPort,
+                interfaceIndex: r.interfaceIndex, dscp: 40)
+        else {
             throw EngineError.socket
         }
         videoTx = vtx
         if plan.audio, let audioPort = (ready["audio_port"] as? NSNumber)?.uint16Value, audioPort > 0 {
-            audioTx = UdpSender.open(kind: .audio, ip: r.address, port: audioPort,
-                                     interfaceIndex: r.interfaceIndex, dscp: 48)
+            audioTx = UdpSender.open(
+                kind: .audio, ip: r.address, port: audioPort,
+                interfaceIndex: r.interfaceIndex, dscp: 48)
         } else if plan.audio {
             log("audio: receiver gave no audio port, continuing without sound")
         }
 
-        let kbps = options.bitrate > 0 ? options.bitrate
+        let kbps =
+            options.bitrate > 0
+            ? options.bitrate
             : AutoBitrate.videoKbps(width: plan.width, height: plan.height, fps: plan.fps, codec: plan.codec)
         if options.bitrate == 0 { log("video: auto bitrate \(kbps) kbit/s") }
-        guard let encoder = VideoEncoder(codec: plan.codec, width: plan.width, height: plan.height,
-                                         fps: plan.fps, kbps: kbps, profile: options.profile) else {
+        guard
+            let encoder = VideoEncoder(
+                codec: plan.codec, width: plan.width, height: plan.height,
+                fps: plan.fps, kbps: kbps, profile: options.profile)
+        else {
             throw EngineError.encoder
         }
         self.encoder = encoder
         wireVideo(encoder)
 
         if audioTx != nil {
-            let audioBps = options.audioBitrate > 0 ? options.audioBitrate
+            let audioBps =
+                options.audioBitrate > 0
+                ? options.audioBitrate
                 : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
             if options.audioBitrate == 0 { log("audio: auto bitrate \(audioBps / 1000) kbit/s") }
-            audio = OpusAudio(bitrate: audioBps, frameMs: options.audioFrameMs,
-                              fec: options.audioFEC)
+            audio = OpusAudio(
+                bitrate: audioBps, frameMs: options.audioFrameMs,
+                fec: options.audioFEC)
             wireAudio()
         }
 
@@ -399,7 +439,8 @@ public final class Engine {
             if self.needHead.take() {
                 tx.send(frame: [UInt8](audio.head), flags: .config, ptsUS: self.relativeUS(pts), hostLat: 0)
             }
-            tx.send(frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts), hostLat: self.hostLatency(pts))
+            tx.send(
+                frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts), hostLat: self.hostLatency(pts))
             self.audioFrames += 1
         }
     }
@@ -413,8 +454,11 @@ public final class Engine {
             timer.setEventHandler { [weak self] in
                 guard let self, let encoder = self.encoder else { return }
                 let p = self.plan
-                guard let buffer = SyntheticFrame.make(width: p?.width ?? self.options.width,
-                                                       height: p?.height ?? self.options.height, index: index) else { return }
+                guard
+                    let buffer = SyntheticFrame.make(
+                        width: p?.width ?? self.options.width,
+                        height: p?.height ?? self.options.height, index: index)
+                else { return }
                 index += 1
                 let pts = CMClockGetTime(CMClockGetHostTimeClock())
                 if self.basePTS == nil { self.basePTS = pts }
@@ -447,10 +491,11 @@ public final class Engine {
         Task {
             do {
                 let p = self.plan
-                try await capture.start(displayIndex: options.display,
-                                        width: p?.width ?? options.width,
-                                        height: p?.height ?? options.height,
-                                        fps: p?.fps ?? options.fps, audio: audio, fit: options.fit)
+                try await capture.start(
+                    displayIndex: options.display,
+                    width: p?.width ?? options.width,
+                    height: p?.height ?? options.height,
+                    fps: p?.fps ?? options.fps, audio: audio, fit: options.fit)
             } catch {
                 failure = error
             }
@@ -477,7 +522,9 @@ public final class Engine {
             if let battery = (msg["battery"] as? NSNumber)?.intValue { deviceBattery = battery }
             if let charging = msg["charging"] as? NSNumber { deviceCharging = charging.boolValue }
             if let thermal = msg["thermal"] as? String { deviceThermal = thermal }
-            if let headroom = (msg["thermal_headroom"] as? NSNumber)?.doubleValue { deviceHeadroom = headroom }
+            if let headroom = (msg["thermal_headroom"] as? NSNumber)?.doubleValue {
+                deviceHeadroom = headroom
+            }
             // Sent only when the state flips, so this fires once per episode, not every second.
             if let hot = (msg["hot"] as? NSNumber)?.boolValue, hot != lastHot {
                 lastHot = hot
@@ -510,9 +557,12 @@ public final class Engine {
     }
 
     private func stopTimers() {
-        statsTimer?.cancel(); statsTimer = nil
-        keepaliveTimer?.cancel(); keepaliveTimer = nil
-        syntheticTimer?.cancel(); syntheticTimer = nil
+        statsTimer?.cancel()
+        statsTimer = nil
+        keepaliveTimer?.cancel()
+        keepaliveTimer = nil
+        syntheticTimer?.cancel()
+        syntheticTimer = nil
     }
 
     private func reportStats() {
@@ -527,8 +577,9 @@ public final class Engine {
         let hostMs = df > 0 ? Double(dl) / Double(df) / 10.0 : 0
         let mbps = Double(db) * 8 / 1e6
         let decodeMs = (receiverStats["decode_ms"] as? NSNumber)?.doubleValue
-        var line = String(format: "stats: %.0f fps, %.1f Mbit/s, host %.1f ms, rtt %.1f ms",
-                          Double(df), mbps, hostMs, control?.rttMs ?? 0)
+        var line = String(
+            format: "stats: %.0f fps, %.1f Mbit/s, host %.1f ms, rtt %.1f ms",
+            Double(df), mbps, hostMs, control?.rttMs ?? 0)
         if let decodeMs {
             line += String(format: ", receiver decode %.1f ms", decodeMs)
             // Remember it: a real session outranks the receiver's own benchmark next time.
@@ -547,18 +598,21 @@ public final class Engine {
             if headroom < 0.3 { line += " (hot: 720p or 30 fps would help)" }
         }
         log(line)
-        let snapshot = SessionStats(fps: Double(df), mbps: mbps, hostMs: hostMs,
-                                    rttMs: control?.rttMs ?? 0, decodeMs: decodeMs,
-                                    audioPackets: audioFrames,
-                                    estMs: hostMs + (control?.rttMs ?? 0) / 2 + (decodeMs ?? 0),
-                                    battery: deviceBattery, charging: deviceCharging,
-                                    thermal: deviceThermal, thermalHeadroom: deviceHeadroom)
+        let snapshot = SessionStats(
+            fps: Double(df), mbps: mbps, hostMs: hostMs,
+            rttMs: control?.rttMs ?? 0, decodeMs: decodeMs,
+            audioPackets: audioFrames,
+            estMs: hostMs + (control?.rttMs ?? 0) / 2 + (decodeMs ?? 0),
+            battery: deviceBattery, charging: deviceCharging,
+            thermal: deviceThermal, thermalHeadroom: deviceHeadroom)
         lastStats = snapshot
         onStats?(snapshot)
-        control?.send(["t": "sender_stats", "rtt_ms": ((control?.rttMs ?? 0) * 10).rounded() / 10,
-                       "host_ms": (hostMs * 10).rounded() / 10, "fps": df, "mbps": (mbps * 10).rounded() / 10,
-                       "encoder": encoder?.codec == .hevc ? "hevc_videotoolbox" : "h264_videotoolbox",
-                       "res": "\(plan?.width ?? options.width)x\(plan?.height ?? options.height)"])
+        control?.send([
+            "t": "sender_stats", "rtt_ms": ((control?.rttMs ?? 0) * 10).rounded() / 10,
+            "host_ms": (hostMs * 10).rounded() / 10, "fps": df, "mbps": (mbps * 10).rounded() / 10,
+            "encoder": encoder?.codec == .hevc ? "hevc_videotoolbox" : "h264_videotoolbox",
+            "res": "\(plan?.width ?? options.width)x\(plan?.height ?? options.height)",
+        ])
     }
 
     /// ScreenCaptureKit is change-driven: on a still desktop it delivers ~1 fps, and if it goes fully
