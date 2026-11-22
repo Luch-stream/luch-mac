@@ -10,6 +10,9 @@ final class ConfigServer {
     private var fd: Int32 = -1
     private var source: DispatchSourceRead?
     var target: SendTarget?
+    /// The last line the extension sent back, shown on the send card.
+    private(set) var status: String = ""
+    var onStatus: ((String) -> Void)?
 
     func start() {
         guard fd < 0 else { return }
@@ -46,6 +49,7 @@ final class ConfigServer {
             }
         }
         guard socket >= 0 else { return }
+        NSLog("Luch config: extension asked, target=\(target?.host ?? "nil")")
         defer { close(socket) }
         guard let target,
             let data = try? JSONSerialization.data(withJSONObject: [
@@ -53,5 +57,15 @@ final class ConfigServer {
             ])
         else { return }
         _ = data.withUnsafeBytes { write(socket, $0.baseAddress, $0.count) }
+        // The extension keeps the line open and reports what it is doing.
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let count = recv(socket, &buffer, buffer.count, 0)
+        if count > 0, let text = String(bytes: buffer[0..<count], encoding: .utf8) {
+            let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.status = line
+                self.onStatus?(line)
+            }
+        }
     }
 }

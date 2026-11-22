@@ -11,11 +11,16 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var session: SendSession?
     private var started = false
     private var target: SendTarget?
+    /// Kept open after the handshake so the app can show what the broadcast is doing.
+    private var statusSocket: Int32 = -1
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         // The size comes from the first frame: hardcoding it would letterbox or crop on any other
         // device. Only the destination is known up front.
-        guard let config = Self.fetchConfig() else {
+        let config = Self.fetchConfig()
+        statusSocket = Self.lastSocket
+        report("старт: \(config?.host ?? "нет цели"):\(config?.port ?? 0)")
+        guard let config else {
             finish(reason: "Приложение Luch не выбрало приёмник")
             return
         }
@@ -41,6 +46,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         encoder.onFrame = { [weak session] frame, pts, keyframe in
             session?.sendVideo(frame, ptsUS: pts, keyframe: keyframe)
         }
+        report("кодирую \(outWidth)x\(outHeight) → \(target.host):\(target.port)")
         session.start(to: target, name: "iPhone", width: outWidth, height: outHeight, fps: 60)
         self.encoder = encoder
         self.session = session
@@ -60,11 +66,19 @@ final class SampleHandler: RPBroadcastSampleHandler {
     }
 
     override func broadcastFinished() {
+        report("остановлено")
+        if statusSocket >= 0 { close(statusSocket) }
+        statusSocket = -1
         encoder?.invalidate()
         encoder = nil
         session?.stop()
         session = nil
         started = false
+    }
+
+    private func report(_ text: String) {
+        guard statusSocket >= 0, let data = (text + "\n").data(using: .utf8) else { return }
+        _ = data.withUnsafeBytes { write(statusSocket, $0.baseAddress, $0.count) }
     }
 
     private func finish(reason: String) {
@@ -74,11 +88,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
         finishBroadcastWithError(error)
     }
 
+    nonisolated(unsafe) private static var lastSocket: Int32 = -1
+
     /// The app answers with one JSON line: where to send the picture.
     private static func fetchConfig() -> (host: String, port: UInt16, name: String)? {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
-        defer { close(fd) }
+
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = UInt16(47_899).bigEndian
@@ -91,6 +107,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         guard connected == 0 else { return nil }
         var buffer = [UInt8](repeating: 0, count: 4096)
         let count = recv(fd, &buffer, buffer.count, 0)
+        lastSocket = fd
         guard count > 0,
             let object = try? JSONSerialization.jsonObject(with: Data(buffer[0..<count]))
                 as? [String: Any],

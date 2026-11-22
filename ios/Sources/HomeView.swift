@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var chosen: SendTarget?
     @State private var configServer = ConfigServer()
     @State private var browseTask: Task<Void, Never>?
+    @State private var sendStatus = ""
 
     private var sending: Bool { pageIndex == 1 }
     private var deviceName: String { UIDevice.current.name }
@@ -52,6 +53,7 @@ struct HomeView: View {
             }
         }
         .task {
+            configServer.onStatus = { line in sendStatus = line }
             configServer.start()
             browseTask = Task { @MainActor in
                 for await list in receiverBrowser.updates() {
@@ -142,6 +144,14 @@ struct HomeView: View {
                 .foregroundStyle(LuchStyle.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+
+            if !sendStatus.isEmpty {
+                Text(sendStatus)
+                    .font(.caption)
+                    .foregroundStyle(LuchStyle.accent)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
 
             if chosen != nil {
                 ZStack {
