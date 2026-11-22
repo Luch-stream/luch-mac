@@ -1,15 +1,14 @@
-// The system broadcast picker, stretched under our capsule: the tap goes to the system button
-// itself, which opens the confirmation. No programmatic presses.
+// ReplayKit's own button. Apple requires the user to confirm a broadcast, and this is the control
+// that does it; the app just gives it a place in the card.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import ReplayKit
 import SwiftUI
 
 struct BroadcastPicker: UIViewRepresentable {
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let view = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 220, height: 44))
+        let view = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
         view.preferredExtension = "dev.luch.ios.broadcast"
         view.showsMicrophoneButton = false
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         return view
     }
 

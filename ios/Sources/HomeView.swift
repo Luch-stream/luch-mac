@@ -154,20 +154,16 @@ struct HomeView: View {
             }
 
             if chosen != nil {
-                HStack(spacing: 10) {
-                    Text("Начать трансляцию")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(LuchStyle.primaryText)
+                VStack(spacing: 4) {
                     BroadcastPicker()
-                        .frame(width: 44, height: 44)
+                        .frame(width: 56, height: 56)
+                    Text("Начать трансляцию")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(LuchStyle.secondaryText)
                 }
-                .padding(.leading, 18)
-                .padding(.trailing, 4)
-                .padding(.vertical, 4)
-                .background(LuchStyle.accent.opacity(0.18), in: Capsule())
-                .frame(height: 52)
+                .frame(height: 84)
             } else {
-                Color.clear.frame(height: 52)
+                Color.clear.frame(height: 84)
             }
             Spacer(minLength: 0)
         }
