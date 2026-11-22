@@ -115,8 +115,9 @@ final class ScreenEncoder {
             out.append(contentsOf: UnsafeBufferPointer(start: bytes + offset, count: size))
             offset += size
         }
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let ptsUS = UInt32(max(0, pts.seconds * 1_000_000))
+        let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        let ptsUS = seconds.isFinite && seconds > 0
+            ? UInt32(min(Double(UInt32.max), seconds * 1_000_000)) : 0
         if !reportedFirstFrame {
             reportedFirstFrame = true
             onFirstFrame?(out.count)

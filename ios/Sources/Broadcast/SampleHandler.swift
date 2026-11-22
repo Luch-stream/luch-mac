@@ -67,8 +67,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
                 height: CVPixelBufferGetHeight(pixelBuffer))
         }
         guard let encoder else { return }
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        encoder.encode(pixelBuffer, ptsUS: UInt32(max(0, pts.seconds * 1_000_000)))
+        encoder.encode(pixelBuffer, ptsUS: Self.microseconds(sampleBuffer))
     }
 
     override func broadcastFinished() {
@@ -80,6 +79,14 @@ final class SampleHandler: RPBroadcastSampleHandler {
         session?.stop()
         session = nil
         started = false
+    }
+
+    /// ReplayKit hands out buffers whose timestamp can be invalid; converting `NaN` to UInt32
+    /// traps, and a trap in a broadcast extension kills the whole broadcast.
+    private static func microseconds(_ sampleBuffer: CMSampleBuffer) -> UInt32 {
+        let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return UInt32(min(Double(UInt32.max), seconds * 1_000_000))
     }
 
     private func report(_ text: String) {

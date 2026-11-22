@@ -153,17 +153,21 @@ struct HomeView: View {
                     .lineLimit(2)
             }
 
-            if chosen != nil {
-                VStack(spacing: 4) {
-                    BroadcastPicker()
-                        .frame(width: 56, height: 56)
+            if let chosen {
+                Button {
+                    BroadcastStarter.present(target: chosen)
+                } label: {
                     Text("Начать трансляцию")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(LuchStyle.secondaryText)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 11)
+                        .background(LuchStyle.accent, in: Capsule())
                 }
-                .frame(height: 84)
+                .buttonStyle(.plain)
+                .frame(height: 52)
             } else {
-                Color.clear.frame(height: 84)
+                Color.clear.frame(height: 52)
             }
             Spacer(minLength: 0)
         }
