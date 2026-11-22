@@ -301,8 +301,8 @@ public enum CodecPlanner {
             reasons.append("benchmark measured at \(res)")
         }
 
-        let audio = options.audio && caps.hasOpus
-        if options.audio && !caps.hasOpus { reasons.append("receiver has no audio/opus, video only") }
+        let audio = options.audio && caps.hasAudio
+        if options.audio && !caps.hasAudio { reasons.append("receiver has no audio codec, video only") }
 
         return CodecPlan(
             codec: chosen, width: width, height: height, fps: fps, audio: audio,

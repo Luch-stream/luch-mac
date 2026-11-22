@@ -26,7 +26,8 @@ final class Viewer: ObservableObject, Identifiable {
         surface = view
         guard receiver == nil else { return }
         view.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
-        let receiver = Receiver(name: UIDevice.current.name, sink: relay)
+        let receiver = Receiver(name: UIDevice.current.name, sink: relay, audioCodecs: ["audio/pcm"])
+        receiver.makeAudio = { PcmSink(fd: $0) }
         receiver.onSession = { [weak self] sender in
             DispatchQueue.main.async {
                 self?.status = sender.map { "Смотрим: \($0)" } ?? "Ожидание отправителя"

@@ -124,6 +124,9 @@ public struct ReceiverCaps {
     public func cap(_ codec: VideoCodec) -> VideoCapability? { video[codec.rawValue] }
 
     public var canDoMirror: Bool { modes.isEmpty || modes.contains("mirror") }
+    /// Raw PCM needs no decoder, so any device that can open a socket can play it.
+    public var hasPCM: Bool { audio.contains("audio/pcm") }
+    public var hasAudio: Bool { hasOpus || hasPCM }
     public var hasOpus: Bool { audio.contains("audio/opus") }
 
     /// Short human-readable table for logs and `luch caps`.

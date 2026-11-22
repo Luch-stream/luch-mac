@@ -19,6 +19,8 @@ public final class Receiver {
     public var accepting = true
     /// Provided by the app: it decides whether audio is played at all.
     public var makeAudio: ((Int32) -> AudioSink?)?
+    /// Codecs this receiver advertised in its welcome.
+    public let audioCodecs: [String]
 
     /// Called when a session starts or ends, for the window title and the menu.
     public var onSession: ((String?) -> Void)?
@@ -28,11 +30,13 @@ public final class Receiver {
     private let sink: VideoSink
     private let server: ControlServer
 
-    public init(name: String, sink: VideoSink) {
+    /// `audioCodecs` is what this device can play: Opus by default, raw PCM where no decoder exists.
+    public init(name: String, sink: VideoSink, audioCodecs: [String] = ["audio/opus"]) {
         self.name = name
         self.id = ReceiveCaps.identifier()
+        self.audioCodecs = audioCodecs
         self.sink = sink
-        self.server = ControlServer(name: name, id: id, sink: sink)
+        self.server = ControlServer(name: name, id: id, sink: sink, audioCodecs: audioCodecs)
         server.owner = self
     }
 
@@ -95,10 +99,13 @@ final class ControlServer {
     private var askedKeyframe = false
     private var registerRef: DNSServiceRef?
 
-    init(name: String, id: String, sink: VideoSink) {
+    private let audioCodecs: [String]
+
+    init(name: String, id: String, sink: VideoSink, audioCodecs: [String]) {
         self.name = name
         self.id = id
         self.sink = sink
+        self.audioCodecs = audioCodecs
     }
 
     func start() throws {
@@ -233,7 +240,8 @@ final class ControlServer {
         case "hello":
             let sender = message["name"] as? String ?? "sender"
             log("viewer: hello from \(sender)")
-            let welcome = ReceiveCaps.welcome(name: name, id: id, accepting: owner?.accepting ?? true)
+            let welcome = ReceiveCaps.welcome(
+                name: name, id: id, accepting: owner?.accepting ?? true, audioCodecs: audioCodecs)
             log("viewer: welcome with \(welcome["bench"] ?? "no bench")")
             control.send(welcome)
         case "start":

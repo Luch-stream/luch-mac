@@ -246,6 +246,9 @@ public final class Engine: @unchecked Sendable {
     private var audioTx: MediaSink?
     private var encoder: VideoEncoder?
     private var audio: OpusAudio?
+    private var pcm: PcmAudio?
+    /// Set when the receiver asked for raw PCM: no codec, no OpusHead, the lowest latency there is.
+    private var usingPCM = false
     private var capture: ScreenCapture?
     private var statsTimer: DispatchSourceTimer?
     private var keepaliveTimer: DispatchSourceTimer?
@@ -298,6 +301,7 @@ public final class Engine: @unchecked Sendable {
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
         self.caps = caps
         log(caps.describe())
+        usingPCM = caps.audio.contains("pcm")
         let plan = CodecPlanner.plan(caps: caps, receiverID: r.id, options: options)
         self.plan = plan
         deviceOnBattery = caps.onBattery
@@ -317,7 +321,7 @@ public final class Engine: @unchecked Sendable {
         ]
         if plan.audio {
             start["audio"] = [
-                "codec": "audio/opus", "rate": 48_000, "channels": 2,
+                "codec": usingPCM ? "audio/pcm" : "audio/opus", "rate": 48_000, "channels": 2,
                 "frame_ms": options.audioFrameMs,
             ]
         }
@@ -365,10 +369,23 @@ public final class Engine: @unchecked Sendable {
                 ? options.audioBitrate
                 : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
             if options.audioBitrate == 0 { log("audio: auto bitrate \(audioBps / 1000) kbit/s") }
-            audio = OpusAudio(
-                bitrate: audioBps, frameMs: options.audioFrameMs,
-                fec: options.audioFEC)
-            wireAudio()
+            if usingPCM {
+                let encoder = PcmAudio(frameMs: options.audioFrameMs)
+                encoder.onPacket = { [weak self] data, pts in
+                    guard let self, let tx = self.audioTx else { return }
+                    tx.send(
+                        frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
+                        hostLat: self.hostLatency(pts))
+                    self.audioFrames += 1
+                }
+                pcm = encoder
+                log("audio: pcm \(encoder.sampleRate) Hz x2, \(options.audioFrameMs) ms frames")
+            } else {
+                audio = OpusAudio(
+                    bitrate: audioBps, frameMs: options.audioFrameMs,
+                    fec: options.audioFEC)
+                wireAudio()
+            }
         }
 
         running = true
@@ -479,7 +496,11 @@ public final class Engine: @unchecked Sendable {
             encoder.encode(buffer, pts: pts, forceIDR: self.wantIDR.take())
         }
         capture.onAudio = { [weak self] sampleBuffer in
-            self?.audio?.push(sampleBuffer)
+            if let pcm = self?.pcm {
+                pcm.push(sampleBuffer)
+            } else {
+                self?.audio?.push(sampleBuffer)
+            }
         }
         capture.onStop = { [weak self] why in
             self?.stop(reason: "capture: \(why)")
@@ -527,6 +548,7 @@ public final class Engine: @unchecked Sendable {
         guard let caps = ReceiverCaps(welcome: welcome) else { throw EngineError.noWelcome }
         self.caps = caps
         log(caps.describe())
+        usingPCM = caps.audio.contains("pcm")
         let plan = CodecPlanner.plan(caps: caps, receiverID: "web", options: options)
         self.plan = plan
         log(
@@ -542,7 +564,7 @@ public final class Engine: @unchecked Sendable {
         ]
         if plan.audio {
             start["audio"] = [
-                "codec": "audio/opus", "rate": 48_000, "channels": 2,
+                "codec": usingPCM ? "audio/pcm" : "audio/opus", "rate": 48_000, "channels": 2,
                 "frame_ms": options.audioFrameMs,
             ]
         }
@@ -557,10 +579,12 @@ public final class Engine: @unchecked Sendable {
             ? options.bitrate
             : AutoBitrate.videoKbps(width: plan.width, height: plan.height, fps: plan.fps, codec: plan.codec)
         if options.bitrate == 0 { log("video: auto bitrate \(kbps) kbit/s") }
+        // Baseline has no B-frames, so a plain fragmented MP4 without composition offsets decodes in
+        // every browser; the desktop receivers get whatever profile the user chose.
         guard
             let encoder = VideoEncoder(
                 codec: plan.codec, width: plan.width, height: plan.height,
-                fps: plan.fps, kbps: kbps, profile: options.profile)
+                fps: plan.fps, kbps: kbps, profile: .baseline)
         else {
             throw EngineError.encoder
         }
@@ -572,8 +596,22 @@ public final class Engine: @unchecked Sendable {
                 options.audioBitrate > 0
                 ? options.audioBitrate
                 : AutoBitrate.audioBps(channels: 2, frameMs: options.audioFrameMs)
-            self.audio = OpusAudio(bitrate: audioBps, frameMs: options.audioFrameMs, fec: options.audioFEC)
-            wireAudio()
+            if usingPCM {
+                let encoder = PcmAudio(frameMs: options.audioFrameMs)
+                encoder.onPacket = { [weak self] data, pts in
+                    guard let self, let tx = self.audioTx else { return }
+                    tx.send(
+                        frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
+                        hostLat: self.hostLatency(pts))
+                    self.audioFrames += 1
+                }
+                pcm = encoder
+                log("audio: pcm \(encoder.sampleRate) Hz x2, \(options.audioFrameMs) ms frames")
+            } else {
+                self.audio = OpusAudio(
+                    bitrate: audioBps, frameMs: options.audioFrameMs, fec: options.audioFEC)
+                wireAudio()
+            }
         }
 
         running = true

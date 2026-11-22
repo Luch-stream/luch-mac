@@ -66,7 +66,9 @@ public enum ReceiveCaps {
         return DispatchQueue.main.sync { read() }
     }
 
-    public static func welcome(name: String, id: String, accepting: Bool) -> [String: Any] {
+    public static func welcome(
+        name: String, id: String, accepting: Bool, audioCodecs: [String] = ["audio/opus"]
+    ) -> [String: Any] {
         let hevc = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
         let avc = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264)
         let screen = screen()
@@ -120,7 +122,7 @@ public enum ReceiveCaps {
             "max": maxSize,
             "modes": accepting ? ["mirror"] : [],
             "decoders": decoders,
-            "hw": ["video": video, "audio": ["audio/opus"], "display": display],
+            "hw": ["video": video, "audio": audioCodecs, "display": display],
             "bench": bench,
         ]
     }
