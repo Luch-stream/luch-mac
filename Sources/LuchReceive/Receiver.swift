@@ -96,6 +96,7 @@ final class ControlServer {
     private var current: Control?
     private var statsThread: Thread?
     private var idleSeconds = 0
+    private var lastMessageAt = Date()
     private var askedKeyframe = false
     private var registerRef: DNSServiceRef?
 
@@ -236,6 +237,7 @@ final class ControlServer {
 
     /// Returns false when the connection should close.
     private func handle(_ message: [String: Any], _ control: Control) -> Bool {
+        lastMessageAt = Date()
         switch message["t"] as? String {
         case "hello":
             let sender = message["name"] as? String ?? "sender"
@@ -308,6 +310,13 @@ final class ControlServer {
                 let stats = session.takeStats()
                 server.owner?.onStats?(stats)
 
+                // The sender speaks every second; four quiet seconds mean it is gone, even if the
+                // socket close never reached us.
+                if Date().timeIntervalSince(server.lastMessageAt) > 4 {
+                    log("viewer: no word from the sender for 4 s, ending the session")
+                    server.endSession()
+                    return
+                }
                 // Silence watchdog: ask for a keyframe first, give up only after ten quiet seconds.
                 if stats.fps == 0 {
                     server.idleSeconds += 1

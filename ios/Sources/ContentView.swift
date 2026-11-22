@@ -16,17 +16,23 @@ final class VideoRelay: VideoSink {
 final class Viewer: ObservableObject, Identifiable {
     var audio: PcmSink?
     @Published var status = "Ожидание отправителя"
+    @Published var streaming = false
     @Published var stats = ""
     var surface: VideoSurfaceView?
     let relay = VideoRelay()
 
     private var receiver: Receiver?
 
+    /// The view only shows frames; the receiver lives independently, so a view that is not on
+    /// screen yet does not stop the device from being discoverable.
     func attach(_ view: VideoSurfaceView) {
         relay.view = view
         surface = view
-        guard receiver == nil else { return }
         view.onBroken = { [weak self] in self?.receiver?.requestKeyframe() }
+    }
+
+    func start() {
+        guard receiver == nil else { return }
         let receiver = Receiver(name: UIDevice.current.name, sink: relay, audioCodecs: ["audio/pcm"])
         receiver.makeAudio = { [weak self] fd in
             let sink = PcmSink(fd: fd)
@@ -36,7 +42,12 @@ final class Viewer: ObservableObject, Identifiable {
         receiver.onSession = { [weak self] sender in
             DispatchQueue.main.async {
                 self?.status = sender.map { "Смотрим: \($0)" } ?? "Ожидание отправителя"
+                self?.streaming = sender != nil
                 UIApplication.shared.isIdleTimerDisabled = sender != nil
+                if sender == nil {
+                    // The session is over: drop the last frame instead of freezing on it.
+                    self?.surface?.flush()
+                }
             }
         }
         receiver.onStats = { [weak self] stats in
@@ -66,8 +77,10 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            VideoSurface { viewer.attach($0) }
-                .ignoresSafeArea()
+            if viewer.streaming {
+                VideoSurface { viewer.attach($0) }
+                    .ignoresSafeArea()
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewer.status).font(.caption).bold()
                 if !viewer.stats.isEmpty { Text(viewer.stats).font(.caption2).monospacedDigit() }
@@ -77,5 +90,6 @@ struct ContentView: View {
             .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
             .padding(12)
         }
+        .onAppear { viewer.start() }
     }
 }

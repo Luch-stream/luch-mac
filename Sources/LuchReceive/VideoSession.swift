@@ -127,14 +127,24 @@ public final class VideoSession {
         guard fd >= 0 else { throw POSIXError(.EIO) }
         var size: Int32 = 4 << 20
         setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
+        // Fixed ports, as the Linux receiver does, so a firewall can be opened for them; the
+        // numbers are a preference, an ephemeral port is still the fallback.
+        var ports: [UInt16] = [0]
+        if ProcessInfo.processInfo.environment["LUCH_FIXED_MEDIA_PORTS"] == "1" {
+            ports = [47802, 47803, 0]
+        }
+        var bound: Int32 = -1
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = 0
         addr.sin_addr.s_addr = INADDR_ANY
-        let bound = withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        for port in ports {
+            addr.sin_port = port.bigEndian
+            bound = withUnsafePointer(to: &addr) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
+            if bound == 0 { break }
         }
         guard bound == 0 else {
             close(fd)

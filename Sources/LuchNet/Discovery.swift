@@ -65,6 +65,9 @@ private func resolveIPv4(_ host: String) -> String? {
     guard getaddrinfo(host, nil, &hints, &res) == 0, let first = res else { return nil }
     defer { freeaddrinfo(res) }
     var addr = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+    // A device publishes on every interface it has, including the link-local one: a 169.254
+    // address is not reachable from the LAN, so it is only a last resort.
+    var fallback: String?
     var cur: UnsafeMutablePointer<addrinfo>? = first
     while let ai = cur {
         if ai.pointee.ai_family == AF_INET,
@@ -72,11 +75,16 @@ private func resolveIPv4(_ host: String) -> String? {
                 ai.pointee.ai_addr, ai.pointee.ai_addrlen, &addr, socklen_t(addr.count), nil, 0,
                 NI_NUMERICHOST) == 0
         {
-            return String(cString: addr)
+            let candidate = String(cString: addr)
+            if candidate.hasPrefix("169.254.") {
+                fallback = fallback ?? candidate
+            } else {
+                return candidate
+            }
         }
         cur = ai.pointee.ai_next
     }
-    return nil
+    return fallback
 }
 
 /// Interface index of the LAN (an up, non-loopback interface with an IPv4 address).

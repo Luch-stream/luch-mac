@@ -338,17 +338,25 @@ public final class Engine: @unchecked Sendable {
         log("ready: video port \(videoPort), audio port \(ready["audio_port"] ?? 0)")
 
         guard
-            let vtx = UdpSender.open(
-                kind: .video, ip: r.address, port: videoPort,
-                interfaceIndex: r.interfaceIndex, dscp: 40)
+            let vtx =
+                UdpSender.open(
+                    kind: .video, ip: r.address, port: videoPort,
+                    interfaceIndex: r.interfaceIndex, dscp: 40)
+                ?? UdpSender.open(
+                    kind: .video, ip: r.address, port: videoPort,
+                    interfaceIndex: 0, dscp: 40)
         else {
             throw EngineError.socket
         }
         videoTx = vtx
         if plan.audio, let audioPort = (ready["audio_port"] as? NSNumber)?.uint16Value, audioPort > 0 {
-            audioTx = UdpSender.open(
-                kind: .audio, ip: r.address, port: audioPort,
-                interfaceIndex: r.interfaceIndex, dscp: 48)
+            audioTx =
+                UdpSender.open(
+                    kind: .audio, ip: r.address, port: audioPort,
+                    interfaceIndex: r.interfaceIndex, dscp: 48)
+                ?? UdpSender.open(
+                    kind: .audio, ip: r.address, port: audioPort,
+                    interfaceIndex: 0, dscp: 48)
         } else if plan.audio {
             log("audio: receiver gave no audio port, continuing without sound")
         }
@@ -378,10 +386,14 @@ public final class Engine: @unchecked Sendable {
                 let encoder = PcmAudio(frameMs: options.audioFrameMs)
                 encoder.onPacket = { [weak self] data, pts in
                     guard let self, let tx = self.audioTx else { return }
+                    let latency = self.hostLatency(pts)
                     tx.send(
                         frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
-                        hostLat: self.hostLatency(pts))
+                        hostLat: latency)
                     self.audioFrames += 1
+                    if self.audioFrames % 100 == 0 {
+                        log("audio: capture latency \(Int(latency) / 10) ms")
+                    }
                 }
                 pcm = encoder
                 log("audio: pcm \(encoder.sampleRate) Hz x2, \(encoder.frameMs) ms frames")
@@ -605,10 +617,14 @@ public final class Engine: @unchecked Sendable {
                 let encoder = PcmAudio(frameMs: options.audioFrameMs)
                 encoder.onPacket = { [weak self] data, pts in
                     guard let self, let tx = self.audioTx else { return }
+                    let latency = self.hostLatency(pts)
                     tx.send(
                         frame: [UInt8](data), flags: [], ptsUS: self.relativeUS(pts),
-                        hostLat: self.hostLatency(pts))
+                        hostLat: latency)
                     self.audioFrames += 1
+                    if self.audioFrames % 100 == 0 {
+                        log("audio: capture latency \(Int(latency) / 10) ms")
+                    }
                 }
                 pcm = encoder
                 log("audio: pcm \(encoder.sampleRate) Hz x2, \(encoder.frameMs) ms frames")
@@ -624,6 +640,25 @@ public final class Engine: @unchecked Sendable {
         try startMedia()
         startTimers()
         log("streaming to the browser; Ctrl-C to stop")
+    }
+
+    /// Plays a short tone into the stream so a listener can judge the audio latency by ear.
+    public func soundTest() {
+        if let pcm {
+            log("sound test: pcm tone")
+            pcm.tone()
+        } else if let audio {
+            log("sound test: opus tone")
+            let rate = 48_000.0
+            let total = Int(rate * 0.15)
+            var samples = [Float](repeating: 0, count: total * 2)
+            for index in 0..<total {
+                let value = Float(sin(2 * Double.pi * 1000 * Double(index) / rate)) * 0.4
+                samples[index * 2] = value
+                samples[index * 2 + 1] = value
+            }
+            _ = audio.emit(samples, pts: CMTime(value: 0, timescale: 600))
+        }
     }
 
     // MARK: - events

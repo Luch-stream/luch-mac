@@ -202,7 +202,7 @@ public enum CodecPlanner {
         let scores = ranking(
             caps: caps, receiverID: receiverID, width: width, height: height,
             weights: options.weights)
-        let chosen: VideoCodec
+        var chosen: VideoCodec
         switch options.codec {
         case .h264:
             chosen = scores.contains(where: { $0.codec == .h264 }) ? .h264 : (scores.first?.codec ?? .h264)

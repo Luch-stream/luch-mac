@@ -1,6 +1,7 @@
 // Menu bar UI for Luch on macOS: receiver list, mirror/stop, live latency, quality and login item.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
+import AVFoundation
 import CoreGraphics
 import LuchEngine
 import LuchLocal
@@ -266,6 +267,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         let hello: [String: Any]
     }
     private var pendingPairings: [String: PendingPairing] = [:]
+    private var localTone: AVAudioPlayer?
+    private let latencyLab = LatencyWindow()
 
     private func approvedRecently(_ code: String) -> Bool {
         guard let approved = approvedCode, approved.code == code else { return false }
@@ -391,6 +394,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             ]
         case "state":
             return ["state": state, "streaming": engine != nil, "stats": statsDictionary()]
+        case "latency":
+            if latencyLab.isVisible {
+                latencyLab.close()
+            } else {
+                latencyLab.show(on: Preferences.shared.display.flatMap { $0 < NSScreen.screens.count ? NSScreen.screens[$0] : nil })
+            }
+            rebuildMenu()
+            return ["on": latencyLab.isVisible]
+        case "beep":
+            engine?.soundTest()
+            return ["ok": engine != nil]
         case "allow", "deny":
             // Pairing from the command line, for scripts and for a headless check.
             let code = request["code"] as? String ?? ""
@@ -757,6 +771,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
         menu.addItem(.separator())
 
+        let lab = NSMenuItem(title: "Latency test", action: #selector(toggleLatencyTest), keyEquivalent: "")
+        lab.target = self
+        lab.state = latencyLab.isVisible ? .on : .off
+        menu.addItem(lab)
+
+        let tone = NSMenuItem(title: "Test sound", action: #selector(testSound), keyEquivalent: "")
+        tone.target = self
+        tone.isEnabled = engine != nil
+        menu.addItem(tone)
+
         let launch = NSMenuItem(
             title: "Mirror on launch", action: #selector(toggleMirrorOnLaunch), keyEquivalent: "")
         launch.target = self
@@ -993,6 +1017,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         line += String(format: " · %.0f fps", stats.fps)
         statsLine = line
         statsItem?.title = line
+    }
+
+    /// Plays the same tone here and in the stream: the gap between them is the audio latency.
+    @objc private func toggleLatencyTest() {
+        if latencyLab.isVisible {
+            latencyLab.close()
+        } else {
+            let screen = Preferences.shared.display.flatMap { index in
+                index < NSScreen.screens.count ? NSScreen.screens[index] : nil
+            }
+            latencyLab.show(on: screen)
+        }
+        rebuildMenu()
+    }
+
+    @objc private func testSound() {
+        playToneHere()
+        engine?.soundTest()
+    }
+
+    private func playToneHere() {
+        let rate = 48_000, seconds = 0.15
+        let count = Int(Double(rate) * seconds)
+        var samples = Data()
+        samples.append(contentsOf: Array("RIFF".utf8))
+        let dataSize = UInt32(count * 2 + 36)
+        samples.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian) { Array($0) })
+        samples.append(contentsOf: Array("WAVEfmt ".utf8))
+        samples.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt32(rate).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt32(rate * 2).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt16(2).littleEndian) { Array($0) })
+        samples.append(contentsOf: withUnsafeBytes(of: UInt16(16).littleEndian) { Array($0) })
+        samples.append(contentsOf: Array("data".utf8))
+        samples.append(contentsOf: withUnsafeBytes(of: UInt32(count * 2).littleEndian) { Array($0) })
+        for index in 0..<count {
+            let value = Float(sin(2 * Double.pi * 1000 * Double(index) / Double(rate))) * 0.4
+            samples.append(contentsOf: withUnsafeBytes(of: Int16(value * 32767).littleEndian) { Array($0) })
+        }
+        localTone?.stop()
+        localTone = try? AVAudioPlayer(data: samples)
+        localTone?.play()
     }
 
     @objc private func stopMirror() {

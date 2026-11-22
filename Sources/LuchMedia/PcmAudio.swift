@@ -23,6 +23,29 @@ public final class PcmAudio {
         self.frameMs = min(frameMs, 5)
     }
 
+    /// A short tone through the same path real sound takes: what a listener hears is the latency.
+    public func tone(ms: Int = 150, hz: Double = 1000) {
+        let total = sampleRate * ms / 1000
+        var samples = [Float](repeating: 0, count: total * channels)
+        for index in 0..<total {
+            let value = Float(sin(2 * .pi * hz * Double(index) / Double(sampleRate))) * 0.4
+            samples[index * channels] = value
+            samples[index * channels + 1] = value
+        }
+        let frameLength = frameSamples * channels
+        var offset = 0
+        while offset + frameLength <= samples.count {
+            let chunk = Array(samples[offset..<(offset + frameLength)])
+            offset += frameLength
+            var data = Data(capacity: chunk.count * 2)
+            for sample in chunk {
+                var value = Int16(max(-1, min(1, sample)) * 32767).littleEndian
+                withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+            }
+            onPacket?(data, CMTime(value: 0, timescale: 600))
+        }
+    }
+
     public func push(_ sampleBuffer: CMSampleBuffer) {
         guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
             let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(format)

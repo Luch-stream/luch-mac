@@ -29,7 +29,13 @@ final class PcmSink: AudioSink, @unchecked Sendable {
     }
 
     /// Height of the ring: enough to ride out Wi-Fi jitter without adding a visible delay.
-    private let ringLimit = 48_000 * 2 / 4  // a quarter of a second of stereo samples
+    /// The buffer grows when the network stutters and shrinks back afterwards, like the Android
+    /// receiver does: a fixed buffer is either too small for a bad Wi-Fi or too slow for a good one.
+    private var targetMs = 50
+    private var ringLimit: Int { 48_000 * 2 * targetMs / 1000 }
+    private var cleanSeconds = 0
+    private var lastUnderrunAt = Date.distantPast
+    private var started = false
 
     init(fd: Int32) {
         self.fd = fd
@@ -51,6 +57,7 @@ final class PcmSink: AudioSink, @unchecked Sendable {
                 guard let self else { return noErr }
                 let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
                 self.lock.lock()
+                var missing = false
                 for frame in 0..<Int(frameCount) {
                     let left: Float
                     let right: Float
@@ -61,7 +68,7 @@ final class PcmSink: AudioSink, @unchecked Sendable {
                     } else {
                         left = 0
                         right = 0
-                        self.underruns += 1
+                        missing = true
                     }
                     self.played += 1
                     for (channel, buffer) in buffers.enumerated() {
@@ -74,16 +81,12 @@ final class PcmSink: AudioSink, @unchecked Sendable {
                     self.ring.removeFirst(self.readIndex)
                     self.readIndex = 0
                 }
+                if missing { self.noteUnderrun() }
                 self.lock.unlock()
                 return noErr
             }
             engine.attach(source)
             engine.connect(source, to: engine.mainMixerNode, format: format)
-            do {
-                try engine.start()
-            } catch {
-                NSLog("Luch PCM: engine failed: %@", error.localizedDescription)
-            }
             self.engine = engine
             self.source = source
         }
@@ -133,19 +136,52 @@ final class PcmSink: AudioSink, @unchecked Sendable {
         }
     }
 
+    private func noteUnderrun() {
+        underruns += 1
+        lastUnderrunAt = Date()
+        if targetMs < 200 { targetMs = min(200, targetMs + 20) }
+        cleanSeconds = 0
+    }
+
+    /// Starts the engine on the first audible frame, the way the Android receiver starts its track.
+    private func startIfNeeded(peak: Float) {
+        guard !started, peak > 0.002, let engine else { return }
+        started = true
+        let go = {
+            do {
+                try engine.start()
+            } catch {
+                NSLog("Luch PCM: engine failed: %@", error.localizedDescription)
+            }
+        }
+        if Thread.isMainThread { go() } else { DispatchQueue.main.async(execute: go) }
+    }
+
     private func append(_ int16: [UInt8]) {
         let frames = int16.count / 4
         guard frames > 0 else { return }
         lock.lock()
         appended += frames
+        var peak: Float = 0
         for index in 0..<frames {
             let left = Int16(bitPattern: UInt16(int16[index * 4]) | UInt16(int16[index * 4 + 1]) << 8)
             let right = Int16(bitPattern: UInt16(int16[index * 4 + 2]) | UInt16(int16[index * 4 + 3]) << 8)
-            ring.append(Float(left) / 32768.0)
-            ring.append(Float(right) / 32768.0)
+            let l = Float(left) / 32768.0
+            let r = Float(right) / 32768.0
+            peak = max(peak, max(abs(l), abs(r)))
+            ring.append(l)
+            ring.append(r)
         }
         // A lagging ring would turn into delay, so the oldest samples go first.
-        if ring.count - readIndex > ringLimit { underruns += 1; readIndex = max(0, ring.count - ringLimit) }
+        if ring.count - readIndex > ringLimit {
+            noteUnderrun()
+            readIndex = max(0, ring.count - ringLimit)
+        } else if Date().timeIntervalSince(lastUnderrunAt) > 5, targetMs > 50 {
+            // A clean run for five seconds: give the latency back.
+            targetMs = max(50, targetMs - 10)
+            lastUnderrunAt = Date()
+        }
         lock.unlock()
+        if peak > 0.002 { startIfNeeded(peak: peak) }
     }
 }
