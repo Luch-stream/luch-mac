@@ -13,6 +13,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var target: SendTarget?
     /// Kept open after the handshake so the app can show what the broadcast is doing.
     private var statusSocket: Int32 = -1
+    private var frameTick = 0
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         // The size comes from the first frame: hardcoding it would letterbox or crop on any other
@@ -32,12 +33,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
     /// Built on the first frame, when the real capture size is known.
     private func startEncoding(width: Int, height: Int) {
         guard let target, encoder == nil else { return }
-        // A capture above 1080p is downscaled by the encoder's own limit: 1920 wide is enough for
-        // a mirror and keeps the phone cool.
-        let scale = min(1.0, 1920.0 / Double(width))
+        // A broadcast extension lives under a tight memory cap, so the picture is modest: 1280
+        // wide at 30 fps keeps the encoder well inside it and the phone cool.
+        let scale = min(1.0, 1280.0 / Double(width))
         let outWidth = max(2, Int((Double(width) * scale) / 2) * 2)
         let outHeight = max(2, Int((Double(height) * scale) / 2) * 2)
-        guard let encoder = ScreenEncoder(width: outWidth, height: outHeight, fps: 60, bitrate: 12_000_000)
+        guard let encoder = ScreenEncoder(width: outWidth, height: outHeight, fps: 30, bitrate: 6_000_000)
         else {
             finish(reason: "Энкодер недоступен")
             return
@@ -47,13 +48,15 @@ final class SampleHandler: RPBroadcastSampleHandler {
             session?.sendVideo(frame, ptsUS: pts, keyframe: keyframe)
         }
         report("кодирую \(outWidth)x\(outHeight) → \(target.host):\(target.port)")
-        session.start(to: target, name: "iPhone", width: outWidth, height: outHeight, fps: 60)
+        session.start(to: target, name: "iPhone", width: outWidth, height: outHeight, fps: 30)
         self.encoder = encoder
         self.session = session
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
-        guard started, sampleBufferType == .video else { return }
+        // Only every other frame is encoded: the extension is memory- and CPU-capped.
+        frameTick += 1
+        guard started, sampleBufferType == .video, frameTick % 2 == 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if encoder == nil {
             startEncoding(
