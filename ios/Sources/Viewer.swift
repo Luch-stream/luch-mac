@@ -1,7 +1,6 @@
 // The receiver's presentation state: discovery, the live session, and the numbers the HUD shows.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import CoreMedia
-import Combine
 import Foundation
 import LuchReceive
 import Observation
@@ -42,22 +41,21 @@ final class Viewer {
     @ObservationIgnored private var audio: PcmSink?
     @ObservationIgnored private var receiver: Receiver?
     @ObservationIgnored let browser = SenderBrowser()
-    @ObservationIgnored private var senderCancellable: AnyCancellable?
+    @ObservationIgnored private var senderTask: Task<Void, Never>?
     /// A session exists but the interface may already be back on the waiting screen.
     @ObservationIgnored private var sessionActive = false
 
     // MARK: - lifecycle
 
     func start() {
-        if senderCancellable == nil {
-            senderCancellable = browser.$senders
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] list in
-                    MainActor.assumeIsolated {
-                        self?.senders = list
-                        print("sender-browser: ui list \(list.count)")
-                    }
+        if senderTask == nil {
+            senderTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                for await list in self.browser.updates() {
+                    self.senders = list
+                    print("sender-browser: ui list \(list.count)")
                 }
+            }
         }
         browser.start()
         guard receiver == nil else { return }

@@ -5,15 +5,32 @@ import Foundation
 import Network
 
 @MainActor
-final class SenderBrowser: ObservableObject {
+final class SenderBrowser {
     struct Sender: Identifiable, Equatable {
         let id: String
         let name: String
     }
 
-    @Published private(set) var senders: [Sender] = []
-
+    private(set) var senders: [Sender] = []
+    private var listeners: [UUID: AsyncStream<[Sender]>.Continuation] = [:]
     private var browser: NWBrowser?
+
+    /// One stream per consumer; it starts with the current list, then yields every change.
+    func updates() -> AsyncStream<[Sender]> {
+        AsyncStream { continuation in
+            let id = UUID()
+            listeners[id] = continuation
+            continuation.yield(senders)
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in self?.listeners[id] = nil }
+            }
+        }
+    }
+
+    private func publish(_ list: [Sender]) {
+        senders = list
+        for continuation in listeners.values { continuation.yield(list) }
+    }
 
     func start() {
         guard browser == nil else { return }
@@ -35,7 +52,7 @@ final class SenderBrowser: ObservableObject {
             }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             print("sender-browser: \(results.count) result(s) -> \(list.count)")
-            Task { @MainActor in self?.senders = list }
+            Task { @MainActor in self?.publish(list) }
         }
         browser.start(queue: .main)
         self.browser = browser
@@ -44,7 +61,7 @@ final class SenderBrowser: ObservableObject {
     func stop() {
         browser?.cancel()
         browser = nil
-        senders = []
+        publish([])
     }
 
     private func restart() {
