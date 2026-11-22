@@ -217,6 +217,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         NSWorkspace.shared.open(url)
     }
 
+    @objc private func copyTVAddress() {
+        guard let url = webURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.appendingPathComponent("tv").absoluteString, forType: .string)
+    }
+
     @objc private func copyWebAddress() {
         guard let url = webURL else { return }
         NSPasteboard.general.clearContents()

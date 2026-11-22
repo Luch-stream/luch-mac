@@ -19,7 +19,11 @@ public final class WebIdentity {
             (try? String(contentsOf: directory.appendingPathComponent("web-names.txt"), encoding: .utf8))?
             .split(separator: "\n").map(String.init) ?? []
         let p12 = directory.appendingPathComponent("web-id.p12")
-        if saved != names || !FileManager.default.fileExists(atPath: p12.path) {
+        let ca = directory.appendingPathComponent("ca-cert.pem")
+        // An older build kept only the self-signed pair: without a CA there is nothing to install.
+        if saved != names || !FileManager.default.fileExists(atPath: p12.path)
+            || !FileManager.default.fileExists(atPath: ca.path)
+        {
             names = names.filter { !saved.contains($0) } + saved
             try issue(directory: directory, names: names)
             try names.joined(separator: "\n").write(
@@ -32,6 +36,11 @@ public final class WebIdentity {
         self.identity = identity
         self.directory = directory
         self.names = names
+    }
+
+    /// The CA certificate a phone installs once, in PEM (Android and iOS both take it).
+    public func caCertificatePEM() -> Data? {
+        try? Data(contentsOf: directory.appendingPathComponent("ca-cert.pem"))
     }
 
     /// A laptop may join a different network without restarting the app.

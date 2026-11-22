@@ -37,6 +37,7 @@ public final class WebServer: @unchecked Sendable {
     public var onClient: ((WebSocketConnection) -> Void)?
 
     private var listener: NWListener?
+    private var caListener: NWListener?
     private let queue = DispatchQueue(label: "luch.web.server")
     private var identity: WebIdentity?
     private let directory: URL
@@ -50,6 +51,9 @@ public final class WebServer: @unchecked Sendable {
         let dir = directory
         let identity = try WebIdentity.load(directory: dir, ip: ip)
         self.identity = identity
+        self.ipAddress = ip ?? ""
+        let caData = identity.caCertificatePEM() ?? Data()
+        log("web: CA certificate \(caData.isEmpty ? "missing" : "\(caData.count) bytes")")
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_local_identity(tls.securityProtocolOptions, identity.identity)
         // The page needs a secure context for WebCodecs; the certificate is self-signed on purpose.
@@ -69,11 +73,119 @@ public final class WebServer: @unchecked Sendable {
         listener.start(queue: queue)
         self.listener = listener
         log("web: listening on https://<this host>:\(port)/")
+        startCertificateServer(ip: ip)
     }
 
     public func stop() {
         listener?.cancel()
         listener = nil
+        caListener?.cancel()
+        caListener = nil
+    }
+
+    /// Plain HTTP on :47802, because a phone cannot download a certificate it does not trust yet.
+    private func startCertificateServer(ip: String?) {
+        let plain = NWParameters.tcp
+        plain.allowLocalEndpointReuse = true
+        guard let listener = try? NWListener(using: plain, on: NWEndpoint.Port(rawValue: Proto.caPort)!)
+        else { return }
+        listener.newConnectionHandler = { [weak self] connection in
+            connection.start(queue: self?.queue ?? .main)
+            self?.serveCertificate(connection, buffer: Data())
+        }
+        listener.start(queue: queue)
+        caListener = listener
+        if let ip { log("web: certificate page on http://\(ip):\(Proto.caPort)/") }
+    }
+
+    private func serveCertificate(_ connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) {
+            [weak self] data, _, done, error in
+            guard let self else { return }
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if done || error != nil {
+                    connection.cancel()
+                } else {
+                    self.serveCertificate(connection, buffer: buffer)
+                }
+                return
+            }
+            let head = String(data: buffer[..<end.lowerBound], encoding: .utf8) ?? ""
+            let path = head.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
+            var headers: [String: String] = [:]
+            for line in head.split(separator: "\r\n").dropFirst() {
+                guard let colon = line.firstIndex(of: ":") else { continue }
+                headers[line[..<colon].lowercased()] = line[line.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            // A TV has an old browser and cannot install certificates: the same page, over plain
+            // HTTP, with MediaSource instead of WebCodecs.
+            if path.hasPrefix("/ws"), headers["upgrade"]?.lowercased().contains("websocket") == true,
+                let key = headers["sec-websocket-key"]
+            {
+                let response = """
+                    HTTP/1.1 101 Switching Protocols\r
+                    Upgrade: websocket\r
+                    Connection: Upgrade\r
+                    Sec-WebSocket-Accept: \(WebSocketConnection.accept(for: key))\r
+                    \r
+
+                    """
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in })
+                let socket = WebSocketConnection(connection: connection)
+                self.onClient?(socket)
+                socket.start()
+                return
+            }
+            let ca = self.identity?.caCertificatePEM() ?? Data()
+            let body: Data
+            var type = "text/html; charset=utf-8"
+            if path.hasPrefix("/ca.crt"), !ca.isEmpty {
+                body = ca
+                type = "application/x-x509-ca-cert"
+            } else if path.hasPrefix("/tv") {
+                body = Data(WebPage.tv.utf8)
+            } else {
+                body = Data(WebServer.trustPage(ip: self.ipAddress).utf8)
+            }
+            let response = """
+                HTTP/1.1 200 OK\r
+                Content-Type: \(type)\r
+                Content-Length: \(body.count)\r
+                \(path.hasPrefix("/ca.crt") ? "Content-Disposition: attachment; filename=\"luch-ca.crt\"\r" : "")\r
+
+                """
+            var out = Data(response.utf8)
+            out.append(body)
+            connection.send(content: out, completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
+
+    private var ipAddress: String = ""
+
+    private static func trustPage(ip: String) -> String {
+        """
+        <!doctype html><meta charset="utf-8"><title>Luch — доверие сертификату</title>
+        <body style="font:16px system-ui;max-width:40em;margin:2em auto;padding:0 1em;line-height:1.5">
+        <h1>Luch</h1>
+        <p>Чтобы браузер открывал трансляцию по HTTPS, установите корневой сертификат Luch —
+        один раз на устройстве.</p>
+        <p><a href="/ca.crt" style="font-size:1.2em">Скачать сертификат luch-ca.crt</a></p>
+        <h2>Android</h2>
+        <ol><li>Скачайте файл по ссылке и откройте его.</li>
+        <li>Настройки → Безопасность → Установка сертификата → Сертификат CA.</li>
+        <li>Подтвердите предупреждение и вернитесь в браузер.</li></ol>
+        <h2>iOS / iPadOS</h2>
+        <ol><li>Скачайте файл и разрешите профиль.</li>
+        <li>Настройки → Основные → VPN и управление устройством → установить профиль.</li>
+        <li>Настройки → Основные → Об этом устройстве → Доверие сертификатам → включить Luch.</li></ol>
+        <h2>macOS</h2>
+        <p>Откройте файл luch-ca.crt, добавьте в связку «Система» и включите «Доверять всегда».</p>
+        <p style="opacity:.6">Затем откройте <a href="https://\(ip):\(Proto.webPort)/">https://\(ip):\(Proto.webPort)/</a></p>
+        </body>
+        """
     }
 
     private func handle(_ connection: NWConnection) {
@@ -129,7 +241,7 @@ public final class WebServer: @unchecked Sendable {
                 return
             }
 
-            let body = Data(WebPage.html.utf8)
+            let body = path.hasPrefix("/tv") ? Data(WebPage.tv.utf8) : Data(WebPage.html.utf8)
             let response = """
                 HTTP/1.1 200 OK\r
                 Content-Type: text/html; charset=utf-8\r

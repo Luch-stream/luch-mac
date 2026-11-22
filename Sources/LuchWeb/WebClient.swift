@@ -117,32 +117,28 @@ public final class WebMediaSink: MediaSink, @unchecked Sendable {
     @discardableResult
     public func send(frame: [UInt8], flags: PacketFlags, ptsUS: UInt32, hostLat: UInt16) -> Int {
         guard !frame.isEmpty else { return 0 }
-        let chunks = Proto.shards(frame)
-        let shards = UInt16(chunks.count)
         lock.lock()
         let sq = seq
         seq &+= 1
         lock.unlock()
 
+        // One message per access unit: a socket has no MTU to respect, and both pages expect a
+        // whole frame after the 24-byte header.
         var packet = [UInt8]()
-        packet.reserveCapacity(Proto.headerSize + Proto.shardSize)
-        var sent = 0
-        for (index, chunk) in chunks.enumerated() {
-            packet.removeAll(keepingCapacity: true)
-            packet.append(
-                contentsOf: Proto.header(
-                    kind: kind, flags: flags, shard: UInt16(index), shards: shards,
-                    seq: sq, ptsUS: ptsUS, frameLen: UInt32(frame.count), hostLat: hostLat))
-            packet.append(contentsOf: chunk)
-            client.socket.send(binary: Data(packet))
-            sent += 1
-        }
+        packet.reserveCapacity(Proto.headerSize + frame.count)
+        packet.append(
+            contentsOf: Proto.header(
+                kind: kind, flags: flags, shard: 0, shards: 1,
+                seq: sq, ptsUS: ptsUS, frameLen: UInt32(frame.count), hostLat: hostLat))
+        packet.append(contentsOf: frame)
+        client.socket.send(binary: Data(packet))
+
         lock.lock()
         framesSent += 1
         bytesSent += UInt64(frame.count)
         latencySum += UInt64(hostLat)
         lock.unlock()
-        return sent
+        return 1
     }
 
     public func snapshot() -> MediaStats {

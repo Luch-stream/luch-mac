@@ -1,0 +1,238 @@
+<!doctype html>
+<!-- Luch for TVs: a page that works in an old browser over plain HTTP. MediaSource and H.264 are
+     enough; the page repackages the Annex-B frames into fragmented MP4 itself. No TLS, no CA. -->
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luch</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,sans-serif}
+video{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;background:#000}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;gap:3vmin;align-items:center;justify-content:center;color:#e8e8e8;text-align:center;padding:0 5vw}
+#msg h1{font-size:7vmin;margin:0}#msg p{font-size:3vmin;opacity:.7;margin:0;word-break:break-word}
+#go{font-size:4.5vmin;padding:2vmin 7vmin;border-radius:1.2vmin;border:1px solid #666;background:#1c1c1c;color:#fff}
+#stats{position:fixed;right:1em;bottom:1em;color:#9f9;font:13px/1.4 monospace;text-shadow:0 1px 2px #000;display:none}
+</style>
+<canvas id="probe" style="display:none"></canvas>
+<video id="v" muted playsinline></video>
+<div id="stats"></div>
+<div id="msg"><h1>Luch</h1><p id="hint">Нажмите, чтобы принимать трансляцию с компьютера</p><button id="go" autofocus>Смотреть</button></div>
+<script>
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var ws = null, started = false, stopping = false;
+var sps = null, pps = null, initDone = false, mime = null;
+var ms = null, sb = null, queue = [];
+var timescale = 90000;
+var lastPts = -1, pending = null, seq = 0, fragments = 0, frames = 0;
+
+// ---- little-endian writers -------------------------------------------------------------------
+function u8(n) { return [n & 0xff]; }
+function u16(n) { return [(n >> 8) & 0xff, n & 0xff]; }
+function u32(n) { return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]; }
+function u64(n) { return u32(Math.floor(n / 4294967296)).concat(u32(n >>> 0)); }
+function str(s) { var o = []; for (var i = 0; i < s.length; i++) o.push(s.charCodeAt(i)); return o; }
+function box(type, parts) {
+    var body = [].concat.apply([], parts);
+    return u32(body.length + 8).concat(str(type), body);
+}
+function fullbox(type, version, flags, parts) {
+    return box(type, [u8(version), [(flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff]].concat(parts));
+}
+
+// ---- Annex B to AVCC -------------------------------------------------------------------------
+function nals(frame) {
+    var out = [], i = 0;
+    while (i + 3 < frame.length) {
+        if (frame[i] === 0 && frame[i + 1] === 0 && frame[i + 2] === 1) { out.push(i + 3); i += 3; }
+        else if (i + 4 < frame.length && frame[i] === 0 && frame[i + 1] === 0 && frame[i + 2] === 0 && frame[i + 3] === 1) { out.push(i + 4); i += 4; }
+        else i++;
+    }
+    var units = [];
+    for (var k = 0; k < out.length; k++) {
+        var start = out[k], end = k + 1 < out.length ? out[k + 1] : frame.length;
+        while (end > start && frame[end - 1] === 0) end--;   // trailing zero of the next start code
+        units.push(frame.subarray(start, end));
+    }
+    return units;
+}
+function avccSample(frame) {
+    var units = nals(frame), parts = [];
+    for (var i = 0; i < units.length; i++) {
+        parts.push(u32(units[i].length));
+        for (var j = 0; j < units[i].length; j++) parts.push(units[i][j]);
+    }
+    return new Uint8Array(parts);
+}
+
+// ---- fragmented MP4 --------------------------------------------------------------------------
+function avcC() {
+    var profile = sps[1], compat = sps[2], level = sps[3];
+    return box('avcC', [
+        u8(1), u8(profile), u8(compat), u8(level), u8(0xff), u8(0xe1),
+        u16(sps.length), Array.prototype.slice.call(sps),
+        u8(1), u16(pps.length), Array.prototype.slice.call(pps)
+    ]);
+}
+function initSegment(width, height) {
+    var ftyp = box('ftyp', [str('iso6'), u32(0), str('iso6'), str('iso5'), str('mp41')]);
+    var mvhd = fullbox('mvhd', 0, 0, [
+        u32(0), u32(0), u32(timescale), u32(0), u32(0x00010000), u16(0x0100), u16(0),
+        u32(0), u32(0), u32(0x00010000), u32(0), u32(0), u32(0), u32(0),
+        u32(0x00010000), u32(0), u32(0), u32(0), u32(0x40000000), u32(0), u32(0), u32(0), u32(0), u32(0), u32(2)
+    ]);
+    var tkhd = fullbox('tkhd', 0, 3, [
+        u32(0), u32(0), u32(1), u32(0), u32(0), u32(0), u32(0), u32(0), u16(0), u16(0), u16(0), u16(0),
+        u32(0x00010000), u32(0), u32(0), u32(0), u32(0x00010000), u32(0), u32(0), u32(0),
+        u32(0x40000000), u32(width << 16), u32(height << 16)
+    ]);
+    var mdhd = fullbox('mdhd', 0, 0, [u32(0), u32(0), u32(timescale), u32(0), u16(0x55c4), u16(0)]);
+    var hdlr = fullbox('hdlr', 0, 0, [u32(0), str('vide'), u32(0), u32(0), u32(0), str('VideoHandler'), u8(0)]);
+    var vmhd = fullbox('vmhd', 0, 1, [u16(0), u16(0), u16(0), u16(0)]);
+    var dinf = box('dinf', [fullbox('dref', 0, 0, [u32(1), fullbox('url ', 0, 1, [])])]);
+    // VisualSampleEntry: 6 reserved, data_reference_index, then the fixed 70 bytes before the boxes.
+    var entry = [
+        u8(0), u8(0), u8(0), u8(0), u8(0), u8(0), u16(1),
+        u16(0), u16(0), u32(0), u32(0), u32(0),
+        u16(width), u16(height),
+        u32(0x00480000), u32(0x00480000), u32(0), u16(1),
+        new Array(32).fill(0), u16(0x0018), u16(0xffff)
+    ];
+    var avc1 = box('avc1', entry.concat([avcC()]));
+    var stsd = fullbox('stsd', 0, 0, [u32(1), avc1]);
+    var empty = function (type) { return fullbox(type, 0, 0, [u32(0)]); };
+    var stbl = box('stbl', [stsd, empty('stts'), empty('stsc'), empty('stsz'), empty('stco')]);
+    var minf = box('minf', [vmhd, dinf, stbl]);
+    var mdia = box('mdia', [mdhd, hdlr, minf]);
+    var trak = box('trak', [tkhd, mdia]);
+    return new Uint8Array(ftyp.concat(box('moov', [mvhd, trak])));
+}
+
+function fragment(pts90, duration, sample) {
+    var num = ++seq;
+    var mfhd = fullbox('mfhd', 0, 0, [u32(num)]);
+    var tfhd = fullbox('tfhd', 0, 0x020000, [u32(1)]);
+    var tfdt = fullbox('tfdt', 1, 0, [u64(pts90)]);
+    var makeTrun = function (offset) {
+        return fullbox('trun', 0, 0x000301, [u32(1), u32(offset), u32(duration), u32(sample.length)]);
+    };
+    var estimate = box('moof', [mfhd, box('traf', [tfhd, tfdt, makeTrun(0)])]).length;
+    var moof = box('moof', [mfhd, box('traf', [tfhd, tfdt, makeTrun(estimate + 8)])]);
+    var mdat = box('mdat', [Array.prototype.slice.call(sample)]);
+    return new Uint8Array(moof.concat(mdat));
+}
+
+// ---- the stream ------------------------------------------------------------------------------
+function setStreaming(on) {
+    $('msg').style.display = on ? 'none' : 'flex';
+}
+function start() {
+    stopping = false;
+    setStreaming(false);
+    $('hint').textContent = 'Подключение…';
+    var secure = location.protocol === 'https:';
+    ws = new WebSocket((secure ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = function () {
+        send({
+            t: 'hello', v: 0, name: 'Web', model: 'TV',
+            display: { width: screen.width, height: screen.height }, mode: 'none'
+        });
+    };
+    ws.onmessage = function (e) {
+        if (typeof e.data === 'string') onControl(JSON.parse(e.data));
+        else onMedia(new Uint8Array(e.data));
+    };
+    ws.onclose = function () {
+        if (stopping) return;
+        $('msg').style.display = 'flex';
+        $('go').textContent = 'Смотреть';
+        $('hint').textContent = 'Связь потеряна';
+    };
+}
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+function onControl(m) {
+    if (m.t === 'start') {
+        started = true;
+        send({ t: 'ready', video_port: 0, audio_port: 0 });
+        send({ t: 'keyframe' });
+        $('v').play().catch(function () {});
+    } else if (m.t === 'stop' || m.t === 'bye') {
+        stopping = true;
+        setStreaming(false);
+        $('hint').textContent = 'Остановлено';
+        ws.close();
+    } else if (m.t === 'sender_stats') {
+        $('stats').style.display = '';
+        $('stats').textContent = m.fps + ' fps · ' + m.mbps + ' Mbit/s';
+    }
+}
+
+function onMedia(b) {
+    if (b.length < 24) return;
+    var view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    var kind = b[0], flags = b[1];
+    var pts = view.getUint32(12) * 1000;      // header carries microseconds
+    var len = view.getUint32(16);
+    var data = b.subarray(24, 24 + len);
+    if (kind !== 1) return;
+    if (flags & 1) {
+        var units = nals(data);
+        for (var i = 0; i < units.length; i++) {
+            var type = units[i][0] & 0x1f;
+            if (type === 7) sps = units[i];
+            if (type === 8) pps = units[i];
+        }
+    }
+    if (!sps || !pps) return;
+    var sample = avccSample(data);
+    if (!initDone) {
+        mime = 'video/mp4; codecs="avc1.' +
+            [sps[1], sps[2], sps[3]].map(function (x) { return ('0' + x.toString(16)).slice(-2); }).join('') + '"';
+        buildSource();
+        initDone = true;
+    }
+    if (pending) {
+        appendFragment(pending.pts, Math.max(1, Math.min(9000, pts - pending.pts)), pending.sample);
+    }
+    pending = { pts: pts * timescale / 1000000, sample: sample };
+    frames++;
+}
+
+function buildSource() {
+    ms = new MediaSource();
+    $('v').src = URL.createObjectURL(ms);
+    ms.addEventListener('sourceopen', function () {
+        sb = ms.addSourceBuffer(mime);
+        sb.mode = 'segments';
+        sb.addEventListener('updateend', drain);
+        append(initSegment(videoWidth(), videoHeight()));
+    });
+}
+
+function videoWidth() { return screen.width; }
+function videoHeight() { return screen.height; }
+
+function append(data) { queue.push(data); drain(); }
+function appendFragment(pts, duration, sample) {
+    append(fragment(Math.round(pts), duration, sample));
+}
+function drain() {
+    if (!sb || sb.updating || !queue.length) return;
+    sb.appendBuffer(queue.shift());
+    // keep only the last seconds: a live stream must not grow a buffer forever
+    try {
+        var start = sb.buffered.start(0), end = sb.buffered.end(0);
+        if (end - start > 6) sb.remove(start, end - 4);
+        if (end - $('v').currentTime > 2) $('v').currentTime = end - 0.3;
+    } catch (e) {}
+}
+
+$('go').onclick = start;
+document.body.ondblclick = function () {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+};
+</script>
+</html>
