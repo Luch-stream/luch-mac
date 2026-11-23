@@ -12,7 +12,8 @@ struct SettingsView: View {
             ZStack {
                 LuchStyle.background.ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 16) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
                     codecCard
                     infoCard
                     hintCard
@@ -24,8 +25,9 @@ struct SettingsView: View {
                         }
                         Spacer()
                     }
+                    }
+                    .padding(20)
                 }
-                .padding(20)
             }
             .navigationTitle("Настройки")
             .navigationBarTitleDisplayMode(.inline)
@@ -34,7 +36,7 @@ struct SettingsView: View {
         }
         .preferredColorScheme(.dark)
         .presentationBackground(LuchStyle.background)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
     }
