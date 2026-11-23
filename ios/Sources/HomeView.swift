@@ -49,23 +49,23 @@ struct HomeView: View {
             }
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
                     header
                         .padding(.horizontal, 20)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
                             VStack(spacing: 14) {
-                                TabView(selection: $pageIndex) {
-                                    receiveCard
-                                        .frame(maxHeight: .infinity, alignment: .top)
-                                        .tag(0)
-                                    sendCard
-                                        .frame(maxHeight: .infinity, alignment: .top)
-                                        .tag(1)
+                                // No pager: the switcher chooses the card, and a page view would
+                                // swallow the horizontal gestures the list underneath needs.
+                                Group {
+                                    if pageIndex == 0 {
+                                        receiveCard
+                                    } else {
+                                        sendCard
+                                    }
                                 }
-                                .tabViewStyle(.page(indexDisplayMode: .never))
-                                .frame(height: cardHeight)
+                                .frame(height: cardHeight, alignment: .top)
                             }
                             .frame(width: 420)
 
@@ -76,23 +76,20 @@ struct HomeView: View {
                     } else {
                         // The phone keeps the explicit switcher too, above the card it pages.
                         modeSwitcher
-                        // Full-bleed pager: the card keeps its margins inside, but a swipe that
-                        // starts at the screen edge still lands on the page.
-                        TabView(selection: $pageIndex) {
-                            receiveCard
-                                .frame(maxHeight: .infinity, alignment: .top)
-                                .tag(0)
-                            sendCard
-                                .frame(maxHeight: .infinity, alignment: .top)
-                                .tag(1)
+                        Group {
+                            if pageIndex == 0 {
+                                receiveCard
+                            } else {
+                                sendCard
+                            }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(height: cardHeight)
+                        .frame(height: cardHeight, alignment: .top)
 
                         bottomContainer
+                            .padding(.top, 4)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
                 .padding(.top, 6)
                 .padding(.bottom, 28)
                 .frame(maxWidth: wide ? 920 : 520)
