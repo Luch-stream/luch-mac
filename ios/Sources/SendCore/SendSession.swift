@@ -136,8 +136,7 @@ final class SendSession: @unchecked Sendable {
             // Both codecs come from what the receiver says it can do — never from a constant:
             // its decoder list and its preferred codec, narrowed to what this encoder can produce.
             let decoders = message["decoders"] as? [String] ?? []
-            let prefer = (message["bench"] as? [String: Any])?["prefer"] as? String
-            negotiatedVideo = Self.negotiateVideo(decoders: decoders, prefer: prefer)
+            negotiatedVideo = CodecChoice.video(from: message)
             let hw = message["hw"] as? [String: Any]
             let audioCodecs = hw?["audio"] as? [String] ?? []
             wantsAudio = audioCodecs.contains("audio/pcm") || decoders.contains("audio/pcm")
@@ -190,20 +189,7 @@ final class SendSession: @unchecked Sendable {
     /// The receiver accepted PCM audio in its welcome.
     private(set) var wantsAudio = false
     /// The video codec both sides agreed on; the encoder configures itself from this.
-    private(set) var negotiatedVideo: VideoCodec = .hevc
-
-    enum VideoCodec { case hevc, avc }
-
-    /// The receiver's preference wins when this device can encode it; otherwise HEVC, then H.264.
-    private static func negotiateVideo(decoders: [String], prefer: String?) -> VideoCodec {
-        let canEncodeHEVC = DeviceCapabilities.videoEncoders.contains("video/hevc")
-        if let prefer, decoders.contains(prefer) {
-            if prefer == "video/avc" { return .avc }
-            if prefer == "video/hevc" && canEncodeHEVC { return .hevc }
-        }
-        if decoders.contains("video/hevc") && canEncodeHEVC { return .hevc }
-        return .avc
-    }
+    private(set) var negotiatedVideo: ScreenEncoder.Codec = .hevc
 
     func sendVideo(_ frame: [UInt8], ptsUS: UInt32, keyframe: Bool) {
         lock.lock()
