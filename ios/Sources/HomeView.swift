@@ -429,10 +429,11 @@ struct HomeView: View {
     private var settingsItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
+                // A title as well as a symbol: the vertical bar and the overflow menu need it.
+                Label("Настройки", systemImage: "gearshape.fill")
+                    .labelStyle(.iconOnly)
                     .foregroundStyle(LuchStyle.primaryText)
             }
-            .accessibilityLabel("Настройки")
         }
     }
 
