@@ -174,7 +174,8 @@ struct HomeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Top-aligned: the icon sits at the same place on both pages, so it never moves.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
     }
@@ -224,7 +225,8 @@ struct HomeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Top-aligned: the icon sits at the same place on both pages, so it never moves.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
     }
