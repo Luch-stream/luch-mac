@@ -1,9 +1,14 @@
-// The address this device offers on the local network, for the "visible as" line on the home screen.
-// SPDX-License-Identifier: GPL-3.0-or-later
-import Darwin
+//
+//  LocalAddress.swift
+//  LuchiOS
+//
+//  Created by iQQator on 23.11.2026.
+//
+
 import Foundation
 
 enum LocalAddress {
+
     /// The first usable IPv4 interface: link-local addresses are skipped, private ranges win.
     static func preferred() -> String? {
         var head: UnsafeMutablePointer<ifaddrs>?
@@ -14,7 +19,7 @@ enum LocalAddress {
         while let pointer = cur {
             let flags = Int32(pointer.pointee.ifa_flags)
             if let addr = pointer.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET),
-                flags & Int32(IFF_UP) != 0, flags & Int32(IFF_LOOPBACK) == 0
+               flags & Int32(IFF_UP) != 0, flags & Int32(IFF_LOOPBACK) == 0
             {
                 var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                 if getnameinfo(

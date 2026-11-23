@@ -42,93 +42,34 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    modeSwitcher
-                        .frame(maxWidth: foldWidth)
-
-                    if wide {
-                        Text(deviceName)
-                            .font(.footnote)
-                            .foregroundStyle(LuchStyle.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        HStack(alignment: .top, spacing: 18) {
-                            cardColumn
-                                .frame(width: 420)
-                            bottomContainer
-                                .frame(maxWidth: .infinity)
-                        }
-                        .padding(.horizontal, 20)
-                    } else {
-                        Group {
-                            if pageIndex == 0 {
-                                receiveCard
-                            } else {
-                                sendCard
-                            }
-                        }
-                        .frame(height: cardHeight, alignment: .top)
-
-                        bottomContainer
-                            .padding(.top, 4)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 28)
-                .frame(maxWidth: wide ? 920 : 520)
-                .frame(maxWidth: .infinity)
+        TabView(selection: $pageIndex) {
+            NavigationStack {
+                receiveScreen
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
+                    .toolbarBackground(LuchStyle.background, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
             }
-            .background(LuchStyle.background.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack {
-                        Image("LuchMark")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(LuchStyle.accent)
-                            .frame(width: 26, height: 26)
-
-                        Text("Luch")
-                            .font(LuchType.brand)
-                            .foregroundStyle(LuchStyle.accent)
-                            .fixedSize()
-                    }
-                    .padding()
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(LuchStyle.primaryText)
-                    }
-                    .accessibilityLabel("Настройки")
-                }
+            .tabItem {
+                Label("Принимать", systemImage: "wifi")
             }
-            .toolbarBackground(LuchStyle.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .overlay {
-                GeometryReader { proxy in
-                    Color.clear
-                    .onAppear {
-                        width = proxy.size.width
-                        foldMid = Self.foldCentre(in: proxy)
-                    }
-                    .onChange(of: proxy.size.width) { _, new in
-                        width = new
-                        foldMid = Self.foldCentre(in: proxy)
-                    }
-                }
+            .tag(0)
+
+            NavigationStack {
+                sendScreen
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
+                    .toolbarBackground(LuchStyle.background, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
             }
+            .tabItem {
+                Label("Отправлять", systemImage: "rectangle.dashed.badge.record")
+            }
+            .tag(1)
         }
-        .onPreferenceChange(CardHeightKey.self) { heights in
-            if let height = heights[0] { receiveHeight = height }
-            if let height = heights[1] { sendHeight = height }
-        }
+        .tint(LuchStyle.accent)
         .task {
             configServer.onStatus = { line in sendStatus = line }
             configServer.start()
@@ -155,16 +96,93 @@ struct HomeView: View {
         return active.frame.midX
     }
 
-    private var modeSwitcher: some View {
-        Picker("Режим", selection: $pageIndex) {
-            Text("Принимать").tag(0)
-            Text("Отправлять").tag(1)
+    private var settingsItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button(action: onSettings) {
+                Image(systemName: "gearshape.fill")
+                    .foregroundStyle(LuchStyle.primaryText)
+            }
+            .accessibilityLabel("Настройки")
         }
-        .pickerStyle(.segmented)
-        .controlSize(.large)
-        // Phone: the full safe-area width. Wide: a comfortable fixed width, centred. Folded: only
-        // as wide as the leading half, so the segments never sit in the crease.
-        .frame(maxWidth: foldWidth)
+    }
+
+    private var receiveScreen: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                if wide {
+                    HStack(alignment: .top, spacing: 18) {
+                        receiveCard.frame(width: 420)
+                        sendersSection.frame(maxWidth: .infinity)
+                    }
+                } else {
+                    receiveCard
+                    sendersSection
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 28)
+            .frame(maxWidth: wide ? 920 : 520)
+            .frame(maxWidth: .infinity)
+        }
+        .background(LuchStyle.background.ignoresSafeArea())
+        .overlay { widthReader }
+    }
+
+    private var sendScreen: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                if wide {
+                    HStack(alignment: .top, spacing: 18) {
+                        sendCard.frame(width: 420)
+                        targetsSection.frame(maxWidth: .infinity)
+                    }
+                } else {
+                    sendCard
+                    targetsSection
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 28)
+            .frame(maxWidth: wide ? 920 : 520)
+            .frame(maxWidth: .infinity)
+        }
+        .background(LuchStyle.background.ignoresSafeArea())
+        .overlay { widthReader }
+    }
+
+    private var widthReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear {
+                    width = proxy.size.width
+                    foldMid = Self.foldCentre(in: proxy)
+                }
+                .onChange(of: proxy.size.width) { _, new in
+                    width = new
+                    foldMid = Self.foldCentre(in: proxy)
+                }
+        }
+    }
+
+    private var sendersSection: some View {
+        list(
+            viewer.senders.map { ($0.id, $0.name, "") },
+            empty: "Пока не найдены",
+            selected: nil,
+            icon: "laptopcomputer",
+            onTap: { _ in })
+    }
+
+    private var targetsSection: some View {
+        list(
+            targets.map { ($0.id, $0.name, $0.model) },
+            empty: "Пока не найдены",
+            selected: chosen?.id,
+            icon: "display",
+            onTap: { id in
+                chosen = targets.first { $0.id == id }
+                if let chosen { prepare(chosen) }
+            })
     }
 
     private var cardColumn: some View {
@@ -211,46 +229,6 @@ struct HomeView: View {
             Button(action: onSettings) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(LuchStyle.primaryText)
-                    .frame(width: 46, height: 46)
-                    .background(LuchStyle.surface, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Настройки")
-        }
-    }
-
-    private var headerOld: some View {
-        HStack(spacing: 12) {
-            Image("LuchMark")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(LuchStyle.accent)
-                .frame(width: 24, height: 24)
-                .frame(width: 46, height: 46)
-                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            Text("Luch")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(LuchStyle.accent)
-
-            if wide {
-                Spacer(minLength: 0)
-                modeSwitcher
-                Spacer(minLength: 0)
-                Text(deviceName)
-                    .font(.footnote)
-                    .foregroundStyle(LuchStyle.secondaryText)
-                    .lineLimit(1)
-                    .frame(maxWidth: 200, alignment: .trailing)
-            } else {
-                Spacer(minLength: 0)
-            }
-
-            Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(LuchStyle.primaryText)
                     .frame(width: 46, height: 46)
                     .background(LuchStyle.surface, in: Circle())
@@ -466,7 +444,6 @@ struct HomeView: View {
         SendConfig.store(target)
         configServer.target = target
     }
-
 }
 
 #if DEBUG
