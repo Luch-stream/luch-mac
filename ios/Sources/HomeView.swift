@@ -64,20 +64,27 @@ struct HomeView: View {
             .navigationTitle("Luch")
             .toolbar { settingsItem }
         } detail: {
-            List {
-                Section("Отправители рядом") {
-                    if viewer.senders.isEmpty {
-                        ContentUnavailableView(
-                            "Пока не найдены",
-                            systemImage: "laptopcomputer",
-                            description: Text("Откройте Luch на компьютере в этой же сети"))
-                    } else {
+            ScrollView {
+                if viewer.senders.isEmpty {
+                    ContentUnavailableView(
+                        "Пока не найдены",
+                        systemImage: "laptopcomputer",
+                        description: Text("Откройте Luch на компьютере в этой же сети"))
+                        .padding(.top, 80)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(viewer.senders) { sender in
-                            Label(sender.name, systemImage: "laptopcomputer")
+                            deviceCard(
+                                symbol: "laptopcomputer",
+                                title: sender.name,
+                                subtitle: "Luch",
+                                selected: false)
                         }
                     }
+                    .padding(20)
                 }
             }
+            .background(LuchStyle.background)
             .navigationTitle("Отправители рядом")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -114,36 +121,33 @@ struct HomeView: View {
             .navigationTitle("Luch")
             .toolbar { settingsItem }
         } detail: {
-            List {
-                Section("Приёмники рядом") {
-                    if targets.isEmpty {
-                        ContentUnavailableView(
-                            "Пока не найдены",
-                            systemImage: "display",
-                            description: Text("Приёмник должен быть в этой же сети"))
-                    } else {
+            ScrollView {
+                if targets.isEmpty {
+                    ContentUnavailableView(
+                        "Пока не найдены",
+                        systemImage: "display",
+                        description: Text("Приёмник должен быть в этой же сети"))
+                        .padding(.top, 80)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(targets) { target in
                             Button {
                                 chosen = target
                                 prepare(target)
                             } label: {
-                                HStack {
-                                    Label(target.name, systemImage: "display")
-                                        .foregroundStyle(LuchStyle.primaryText)
-                                    Spacer(minLength: 0)
-                                    if chosen?.id == target.id {
-                                        Image(systemName: "checkmark")
-                                            .fontWeight(.semibold)
-                                            .foregroundStyle(LuchStyle.accent)
-                                    }
-                                }
-                                .contentShape(Rectangle())
+                                deviceCard(
+                                    symbol: "display",
+                                    title: target.name,
+                                    subtitle: "Luch",
+                                    selected: chosen?.id == target.id)
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                    .padding(20)
                 }
             }
+            .background(LuchStyle.background)
             .navigationTitle("Приёмники рядом")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -153,6 +157,39 @@ struct HomeView: View {
     }
 
     // MARK: - pieces
+
+    /// Adaptive columns: the grid decides how many cards fit, as HIG asks for a collection.
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 220), spacing: 12)]
+    }
+
+    private func deviceCard(
+        symbol: String, title: String, subtitle: String, selected: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(LuchStyle.accent)
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(LuchStyle.primaryText)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(LuchStyle.secondaryText)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    selected ? LuchStyle.accent : LuchStyle.separator,
+                    lineWidth: selected ? 2 : 1)
+        }
+        .contentShape(Rectangle())
+    }
 
     private var settingsItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
