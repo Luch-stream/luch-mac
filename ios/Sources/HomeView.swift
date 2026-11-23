@@ -18,6 +18,8 @@ struct HomeView: View {
     @State private var sendStatus = ""
     /// Live hinge angle in degrees; nil when this device has no hinge or is flat open.
     @State private var hingeAngle: CGFloat?
+    /// The active fold band, in the window's coordinates; nil when the device is flat.
+    @State private var division: CGRect?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -37,6 +39,13 @@ struct HomeView: View {
         .tint(LuchStyle.accent)
         .background(LuchStyle.background)
         .readingHinge { angle in hingeAngle = angle }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { division = Self.foldBand(in: proxy) }
+                    .onChange(of: proxy.size) { _, _ in division = Self.foldBand(in: proxy) }
+            }
+        }
         .task {
             configServer.onStatus = { line in sendStatus = line }
             configServer.start()
@@ -121,26 +130,63 @@ struct HomeView: View {
     }
 
     private var receiveScreen: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                receiveStatus
-                sendersCollection
-            }
-            .padding(20)
-        }
-        .background(LuchStyle.background)
+        twoSides { receiveStatus } trailing: { sendersCollection }
     }
 
     private var sendScreen: some View {
-        ScrollView {
+        twoSides {
             VStack(alignment: .leading, spacing: 20) {
                 sendStatusRow
                 startSection
-                targetsCollection
             }
-            .padding(20)
+        } trailing: {
+            targetsCollection
         }
-        .background(LuchStyle.background)
+    }
+
+    /// The band of an active fold, or nil when the device is flat.
+    private static func foldBand(in proxy: GeometryProxy) -> CGRect? {
+        guard #available(iOS 27.1, *) else { return nil }
+        let regions = proxy.reservedRegions(
+            kind: .division, options: [.includeInactive], layoutDirectionBehavior: .fixed)
+        guard let active = regions.first(where: { $0.isActive }), active.frame.width > 4 else {
+            return nil
+        }
+        return active.frame
+    }
+
+    /// When the device is half folded, the two blocks sit on either side of the crease with the
+    /// fold's own width as the gutter; flat, they stack in one column.
+    @ViewBuilder
+    private func twoSides<Leading: View, Trailing: View>(
+        @ViewBuilder leading: () -> Leading,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        if let division {
+            ScrollView {
+                HStack(alignment: .top, spacing: 0) {
+                    leading()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, 12)
+                    Color.clear.frame(width: division.width + 24)
+                    trailing()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 12)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 20)
+            }
+            .background(LuchStyle.background)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    leading()
+                    trailing()
+                }
+                .padding(20)
+            }
+            .background(LuchStyle.background)
+        }
     }
 
     // MARK: - status
