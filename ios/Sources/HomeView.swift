@@ -104,7 +104,8 @@ struct HomeView: View {
             Text("Отправлять").tag(1)
         }
         .pickerStyle(.segmented)
-        .fixedSize()
+        .controlSize(.large)
+        .frame(maxWidth: 320)
     }
 
     private var header: some View {
