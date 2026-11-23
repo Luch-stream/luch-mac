@@ -56,8 +56,13 @@ struct HomeView: View {
         Group {
             if sideBySide {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
-                    List { receiveStatus }
-                        .navigationTitle("Luch")
+                    List {
+                        receiveStatus
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
+                    .listStyle(.plain)
+                    .navigationTitle("Luch")
                         .toolbar { settingsItem }
                 } detail: {
                     sendersCollection
@@ -89,8 +94,13 @@ struct HomeView: View {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     List {
                         sendStatusRow
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
                         startSection
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
                     }
+                    .listStyle(.plain)
                     .navigationTitle("Luch")
                     .toolbar { settingsItem }
                 } detail: {
@@ -126,8 +136,14 @@ struct HomeView: View {
             symbol: "wifi",
             title: "Готов принимать",
             subtitle: "Телефон виден в сети как «\(deviceName)»",
-            footnote: [LocalAddress.preferred(), "Wi-Fi", "порт 47800"]
-                .compactMap { $0 }.joined(separator: " · "))
+            details: [
+                [LocalAddress.preferred(), "Wi-Fi"].compactMap { $0 }.joined(separator: " · "),
+                "Порт 47800 · HEVC · PCM",
+                viewer.senders.isEmpty
+                    ? "Ждём отправителя" : "Отправителей рядом: \(viewer.senders.count)",
+                "Версия \(Self.version)",
+            ],
+            highlight: false)
     }
 
     private var sendStatusRow: some View {
@@ -135,8 +151,13 @@ struct HomeView: View {
             symbol: "rectangle.dashed.badge.record",
             title: chosen == nil ? "Куда показывать" : "Показываем на",
             subtitle: chosen?.name ?? "Выберите приёмник ниже",
-            footnote: sendStatus.isEmpty ? nil : sendStatus,
-            footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent)
+            details: [
+                "Приёмников рядом: \(targets.count)",
+                chosen.map { "\($0.host):\($0.port)" } ?? "Адрес появится после выбора",
+                "Видео HEVC 1280 · 30 к/с · 6 Мбит/с",
+                sendStatus.isEmpty ? "Версия \(Self.version)" : sendStatus,
+            ],
+            highlight: !sendStatus.isEmpty)
     }
 
     @ViewBuilder
@@ -157,34 +178,51 @@ struct HomeView: View {
         symbol: String,
         title: String,
         subtitle: String,
-        footnote: String?,
-        footnoteTint: Color? = nil
+        details: [String],
+        highlight: Bool
     ) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 18) {
             Image(systemName: symbol)
-                .font(.title2)
+                .font(.system(size: 30, weight: .medium))
                 .foregroundStyle(LuchStyle.accent)
-                .frame(width: 34, alignment: .center)
+                .frame(width: 68, height: 68)
+                .background(
+                    LuchStyle.accent.opacity(0.14),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(title)
-                    .font(.headline)
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(LuchStyle.primaryText)
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(LuchStyle.secondaryText)
-                if let footnote {
-                    Text(footnote)
-                        .font(.caption)
-                        .foregroundStyle(footnoteTint ?? LuchStyle.secondaryText)
-                        .padding(.top, 2)
+                ForEach(details, id: \.self) { line in
+                    Text(line)
+                        .font(.footnote)
+                        .foregroundStyle(
+                            highlight && line == details.last
+                                ? LuchStyle.accent : LuchStyle.secondaryText)
                 }
             }
+            Spacer(minLength: 0)
         }
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(LuchStyle.separator, lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
+    }
+
+    private static var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
     }
 
     // MARK: - collections
