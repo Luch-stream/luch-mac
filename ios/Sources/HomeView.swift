@@ -297,15 +297,22 @@ struct HomeView: View {
     // MARK: - chips
 
     /// What we can play, from the same list the receiver advertises.
+    /// The chosen codec first, then the rest of what the hardware has.
+    private var advertisedVideo: [String] {
+        let all = DeviceCapabilities.videoDecoders
+        guard let preferred = CodecSettings.video.codec, all.contains(preferred) else { return all }
+        return [preferred] + all.filter { $0 != preferred }
+    }
+
     private var receiveChips: [Chip] {
         var chips = [
             Chip(LocalAddress.preferred() ?? "без адреса", "wifi"),
             Chip("47800", "number"),
         ]
-        for label in DeviceCapabilities.labels(for: DeviceCapabilities.videoDecoders) {
+        for label in DeviceCapabilities.labels(for: advertisedVideo) {
             chips.append(Chip(label, label == "HEVC" ? "video" : "film"))
         }
-        for label in DeviceCapabilities.labels(for: DeviceCapabilities.audio) {
+        for label in DeviceCapabilities.labels(for: CodecSettings.audio.codecs) {
             chips.append(Chip(label, "waveform"))
         }
         return chips
@@ -324,7 +331,7 @@ struct HomeView: View {
         for label in DeviceCapabilities.labels(for: DeviceCapabilities.videoEncoders) {
             chips.append(Chip(label, label == "HEVC" ? "video" : "film"))
         }
-        for label in DeviceCapabilities.labels(for: DeviceCapabilities.audio) {
+        for label in DeviceCapabilities.labels(for: CodecSettings.audio.codecs) {
             chips.append(Chip(label, "waveform"))
         }
         return chips

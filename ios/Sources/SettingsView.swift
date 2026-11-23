@@ -13,6 +13,7 @@ struct SettingsView: View {
                 LuchStyle.background.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 16) {
+                    codecCard
                     infoCard
                     hintCard
                     Spacer(minLength: 0)
@@ -36,6 +37,39 @@ struct SettingsView: View {
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
+    }
+
+    @State private var video = CodecSettings.video
+    @State private var audio = CodecSettings.audio
+
+    private var codecCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("КОДЕКИ")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(LuchStyle.secondaryText)
+
+            Picker("Видео", selection: $video) {
+                ForEach(VideoPreference.available) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: video) { _, new in CodecSettings.video = new }
+
+            Picker("Звук", selection: $audio) {
+                ForEach(AudioPreference.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: audio) { _, new in CodecSettings.audio = new }
+
+            Text("Auto — порядок, который даёт железо. Выбор уходит приёмнику в welcome и меняет предпочтение отправителя.")
+                .font(.caption)
+                .foregroundStyle(LuchStyle.secondaryText)
+        }
+        .padding(16)
+        .glassSurface(cornerRadius: 20)
     }
 
     private var infoCard: some View {

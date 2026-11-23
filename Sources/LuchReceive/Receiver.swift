@@ -23,6 +23,8 @@ public final class Receiver: @unchecked Sendable {
     public var makeAudio: ((Int32) -> AudioSink?)?
     /// Codecs this receiver advertised in its welcome.
     public let audioCodecs: [String]
+    /// The codec the person chose in settings; nil keeps the hardware order.
+    private let videoPreference: String?
 
     /// Called when a session starts or ends, for the window title and the menu.
     public var onSession: ((String?) -> Void)?
@@ -33,12 +35,19 @@ public final class Receiver: @unchecked Sendable {
     private let server: ControlServer
 
     /// `audioCodecs` is what this device can play: Opus by default, raw PCM where no decoder exists.
-    public init(name: String, sink: VideoSink, audioCodecs: [String] = ["audio/opus"]) {
+    /// `videoPreference` is the codec chosen in settings; nil keeps the hardware order.
+    public init(
+        name: String, sink: VideoSink, audioCodecs: [String] = ["audio/opus"],
+        videoPreference: String? = nil
+    ) {
         self.name = name
         self.id = ReceiveCaps.identifier()
         self.audioCodecs = audioCodecs
+        self.videoPreference = videoPreference
         self.sink = sink
-        self.server = ControlServer(name: name, id: id, sink: sink, audioCodecs: audioCodecs)
+        self.server = ControlServer(
+            name: name, id: id, sink: sink, audioCodecs: audioCodecs,
+            videoPreference: videoPreference)
         server.owner = self
     }
 
@@ -99,6 +108,7 @@ final class ControlServer {
     private let name: String
     private let id: String
     private let sink: VideoSink
+    private let videoPreference: String?
     private var listenFD: Int32 = -1
     private var running = true
     private var session: VideoSession?
@@ -112,11 +122,15 @@ final class ControlServer {
 
     private let audioCodecs: [String]
 
-    init(name: String, id: String, sink: VideoSink, audioCodecs: [String]) {
+    init(
+        name: String, id: String, sink: VideoSink, audioCodecs: [String],
+        videoPreference: String? = nil
+    ) {
         self.name = name
         self.id = id
         self.sink = sink
         self.audioCodecs = audioCodecs
+        self.videoPreference = videoPreference
     }
 
     func start() throws {
@@ -254,7 +268,8 @@ final class ControlServer {
             control.senderName = sender
             log("viewer: hello from \(sender)")
             let welcome = ReceiveCaps.welcome(
-                name: name, id: id, accepting: owner?.accepting ?? true, audioCodecs: audioCodecs)
+                name: name, id: id, accepting: owner?.accepting ?? true, audioCodecs: audioCodecs,
+                videoPreference: videoPreference)
             log("viewer: welcome with \(welcome["bench"] ?? "no bench")")
             control.send(welcome)
         case "start":

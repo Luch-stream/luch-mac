@@ -67,7 +67,9 @@ final class Viewer {
 
     private func begin(deviceName: String) {
         guard receiver == nil else { return }
-        let receiver = Receiver(name: deviceName, sink: relay, audioCodecs: DeviceCapabilities.audio)
+        let receiver = Receiver(
+            name: deviceName, sink: relay, audioCodecs: CodecSettings.audio.codecs,
+            videoPreference: CodecSettings.video.codec)
         receiver.makeAudio = { [weak self] fd in
             let sink = PcmSink(fd: fd)
             DispatchQueue.main.async {

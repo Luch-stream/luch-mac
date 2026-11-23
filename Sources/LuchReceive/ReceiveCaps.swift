@@ -66,8 +66,11 @@ public enum ReceiveCaps {
         return DispatchQueue.main.sync { read() }
     }
 
+    /// `videoPreference` is the codec the person chose in settings; nil or an unavailable codec
+    /// falls back to the hardware order.
     public static func welcome(
-        name: String, id: String, accepting: Bool, audioCodecs: [String] = ["audio/opus"]
+        name: String, id: String, accepting: Bool, audioCodecs: [String] = ["audio/opus"],
+        videoPreference: String? = nil
     ) -> [String: Any] {
         let hevc = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
         let avc = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264)
@@ -102,9 +105,15 @@ public enum ReceiveCaps {
             "game_mode": false,
         ]
 
+        // A chosen codec moves to the front of the list and becomes the preferred one.
+        if let videoPreference, decoders.contains(videoPreference) {
+            decoders.removeAll { $0 == videoPreference }
+            decoders.insert(videoPreference, at: 0)
+        }
+
         // No benchmark yet: the decoder list and the preferred codec are enough for both senders.
         var bench: [String: Any] = [
-            "prefer": hevc ? "video/hevc" : "video/avc",
+            "prefer": decoders.first ?? (hevc ? "video/hevc" : "video/avc"),
             "res":
                 "\(screen.width > screen.height ? 1920 : 1080)x\(screen.width > screen.height ? 1080 : 1920)",
         ]
