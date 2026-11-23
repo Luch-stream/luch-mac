@@ -5,6 +5,13 @@
 import SwiftUI
 import UIKit
 
+private struct CardHeightKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
 struct HomeView: View {
     let viewer: Viewer
     @Binding var pageIndex: Int
@@ -26,7 +33,11 @@ struct HomeView: View {
     private var wide: Bool { width >= 840 }
 
     /// Both cards are this tall, so the dots and the container below never move.
-    private let cardHeight: CGFloat = 322
+    /// Measured, not guessed: the pager is as tall as the taller of the two cards, so neither
+    /// leaves a gap nor spills over the list underneath.
+    @State private var receiveHeight: CGFloat = 0
+    @State private var sendHeight: CGFloat = 0
+    private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
         ZStack {
@@ -46,8 +57,12 @@ struct HomeView: View {
                         HStack(alignment: .top, spacing: 18) {
                             VStack(spacing: 14) {
                                 TabView(selection: $pageIndex) {
-                                    receiveCard.tag(0).frame(height: cardHeight)
-                                    sendCard.tag(1).frame(height: cardHeight)
+                                    receiveCard
+                                        .frame(maxHeight: .infinity, alignment: .top)
+                                        .tag(0)
+                                    sendCard
+                                        .frame(maxHeight: .infinity, alignment: .top)
+                                        .tag(1)
                                 }
                                 .tabViewStyle(.page(indexDisplayMode: .never))
                                 .frame(height: cardHeight)
@@ -61,25 +76,32 @@ struct HomeView: View {
                     } else {
                         // The phone keeps the explicit switcher too, above the card it pages.
                         modeSwitcher
-                            .padding(.horizontal, 20)
                         // Full-bleed pager: the card keeps its margins inside, but a swipe that
                         // starts at the screen edge still lands on the page.
                         TabView(selection: $pageIndex) {
-                            receiveCard.tag(0).frame(height: cardHeight)
-                            sendCard.tag(1).frame(height: cardHeight)
+                            receiveCard
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .tag(0)
+                            sendCard
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .tag(1)
                         }
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         .frame(height: cardHeight)
 
                         bottomContainer
-                            .padding(.horizontal, 20)
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.top, 6)
                 .padding(.bottom, 28)
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
+        }
+        .onPreferenceChange(CardHeightKey.self) { heights in
+            if let height = heights[0] { receiveHeight = height }
+            if let height = heights[1] { sendHeight = height }
         }
         .task {
             configServer.onStatus = { line in sendStatus = line }
@@ -152,7 +174,7 @@ struct HomeView: View {
     // MARK: - cards
 
     private var receiveCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             cardIcon("wifi")
             Text("Готов принимать")
                 .font(.title.weight(.bold))
@@ -173,37 +195,37 @@ struct HomeView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 22)
-        // Top-aligned: the icon sits at the same place on both pages, so it never moves.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.vertical, 16)
+        // Without this the card would shrink to its text and sit in the middle of the page.
+        .frame(maxWidth: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 20)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: CardHeightKey.self, value: [0: proxy.size.height])
+            }
+        }
     }
 
     private var sendCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             cardIcon("rectangle.dashed.badge.record")
             Text("Куда показывать")
                 .font(.title.weight(.bold))
                 .foregroundStyle(LuchStyle.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            Text(chosen == nil ? "Выберите приёмник ниже" : "Показываем на")
-                .font(.subheadline)
-                .foregroundStyle(LuchStyle.secondaryText)
-            Text(chosen?.name ?? "—")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(LuchStyle.primaryText)
+            Text(chosen?.name ?? "Выберите приёмник ниже")
+                .font(chosen == nil ? .subheadline : .title3.weight(.semibold))
+                .foregroundStyle(chosen == nil ? LuchStyle.secondaryText : LuchStyle.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
-            if !sendStatus.isEmpty {
-                Text(sendStatus)
-                    .font(.caption)
-                    .foregroundStyle(LuchStyle.accent)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-            }
+            Text(sendStatus.isEmpty ? " " : sendStatus)
+                .font(.caption)
+                .foregroundStyle(LuchStyle.accent)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(height: 18)
 
             if let chosen {
                 Button {
@@ -217,25 +239,29 @@ struct HomeView: View {
                         .background(LuchStyle.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .frame(height: 52)
+                .frame(height: 44)
             } else {
-                Color.clear.frame(height: 52)
+                Color.clear.frame(height: 44)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 22)
-        // Top-aligned: the icon sits at the same place on both pages, so it never moves.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.vertical, 16)
+        // Without this the card would shrink to its text and sit in the middle of the page.
+        .frame(maxWidth: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 20)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: CardHeightKey.self, value: [1: proxy.size.height])
+            }
+        }
     }
 
     private func cardIcon(_ symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 26, weight: .semibold))
             .foregroundStyle(LuchStyle.accent)
-            .frame(width: 84, height: 84)
+            .frame(width: 64, height: 64)
             .background(LuchStyle.accent.opacity(0.14), in: Circle())
     }
 
@@ -279,8 +305,6 @@ struct HomeView: View {
                     onTap: { _ in })
             }
         }
-        .transition(.opacity)
-        .animation(.easeInOut(duration: 0.2), value: sending)
     }
 
     private func list(

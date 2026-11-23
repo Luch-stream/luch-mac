@@ -36,6 +36,9 @@ enum UIDebugLaunch {
     static let state: State? = enabled ? flagValue("-luchUI").flatMap(State.init(rawValue:)) : nil
     static let fold: Pose? = enabled ? flagValue("-luchFold").flatMap(Pose.init(rawValue:)) : nil
 
+    /// Which half of the home card to open, for screenshots: 0 receive, 1 send.
+    static let page: Int? = enabled ? flagValue("-luchPage").flatMap(Int.init) : nil
+
     /// The HUD is up for a normal streaming screenshot and hidden for `streamingHidden`.
     static var hudHidden: Bool { state == .streamingHidden }
 

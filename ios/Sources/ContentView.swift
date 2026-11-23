@@ -6,7 +6,7 @@ import UIKit
 struct ContentView: View {
     enum Mode: String, CaseIterable { case receive = "Принимать", send = "Отправлять" }
 
-    @State private var mode: Mode = .receive
+    @State private var mode: Mode = UIDebugLaunch.page == 1 ? .send : .receive
     private var pageIndex: Binding<Int> {
         Binding(
             get: { mode == .receive ? 0 : 1 },
