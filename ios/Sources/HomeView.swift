@@ -43,27 +43,13 @@ struct HomeView: View {
 
     var body: some View {
         TabView(selection: $pageIndex) {
-            NavigationStack {
-                receiveScreen
-                    .navigationTitle("Luch")
-                    .navigationBarTitleDisplayMode(.large)
-                    .toolbar { settingsItem }
-                    .toolbarBackground(LuchStyle.background, for: .navigationBar)
-                    .toolbarBackground(.visible, for: .navigationBar)
-            }
+            receiveTab
             .tabItem {
                 Label("Принимать", systemImage: "wifi")
             }
             .tag(0)
 
-            NavigationStack {
-                sendScreen
-                    .navigationTitle("Luch")
-                    .navigationBarTitleDisplayMode(.large)
-                    .toolbar { settingsItem }
-                    .toolbarBackground(LuchStyle.background, for: .navigationBar)
-                    .toolbarBackground(.visible, for: .navigationBar)
-            }
+            sendTab
             .tabItem {
                 Label("Отправлять", systemImage: "rectangle.dashed.badge.record")
             }
@@ -105,15 +91,71 @@ struct HomeView: View {
         }
     }
 
+    /// Apple's own two-pane container: a sidebar with the card and a detail with the list. On a phone
+    /// it collapses by itself, so the same screen works everywhere.
+    private var receiveTab: some View {
+        Group {
+            if wide {
+                NavigationSplitView {
+                    receiveCard
+                        .padding(20)
+                        .navigationTitle("Luch")
+                        .toolbar { settingsItem }
+                } detail: {
+                    sendersSection
+                        .padding(20)
+                        .navigationTitle("Отправители рядом")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack {
+                    receiveScreen
+                        .navigationTitle("Luch")
+                        .navigationBarTitleDisplayMode(.large)
+                        .toolbar { settingsItem }
+                        .toolbarBackground(LuchStyle.background, for: .navigationBar)
+                        .toolbarBackground(.visible, for: .navigationBar)
+                }
+            }
+        }
+        .background(LuchStyle.background.ignoresSafeArea())
+    }
+
+    private var sendTab: some View {
+        Group {
+            if wide {
+                NavigationSplitView {
+                    sendCard
+                        .padding(20)
+                        .navigationTitle("Luch")
+                        .toolbar { settingsItem }
+                } detail: {
+                    targetsSection
+                        .padding(20)
+                        .navigationTitle("Приёмники рядом")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack {
+                    sendScreen
+                        .navigationTitle("Luch")
+                        .navigationBarTitleDisplayMode(.large)
+                        .toolbar { settingsItem }
+                        .toolbarBackground(LuchStyle.background, for: .navigationBar)
+                        .toolbarBackground(.visible, for: .navigationBar)
+                }
+            }
+        }
+        .background(LuchStyle.background.ignoresSafeArea())
+    }
+
     private var receiveScreen: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
-                if wide {
-                    panes(receiveCard, sendersSection)
-                } else {
-                    receiveCard
-                    sendersSection
-                }
+                receiveCard
+                sendersSection
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
@@ -127,12 +169,8 @@ struct HomeView: View {
     private var sendScreen: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
-                if wide {
-                    panes(sendCard, targetsSection)
-                } else {
-                    sendCard
-                    targetsSection
-                }
+                sendCard
+                targetsSection
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
@@ -141,21 +179,6 @@ struct HomeView: View {
         }
         .background(LuchStyle.background.ignoresSafeArea())
         .overlay { widthReader }
-    }
-
-    /// Wide screens hand the two columns to Apple's arrangement container: it knows the fold, the
-    /// reserved regions and how to rebalance the panes, and we do not.
-    @ViewBuilder
-    private func panes<A: View, B: View>(_ leading: A, _ trailing: B) -> some View {
-        if #available(iOS 27.1, *) {
-            ArrangementSplit(primary: leading, secondary: trailing)
-                .frame(height: 520)
-        } else {
-            HStack(alignment: .top, spacing: 18) {
-                leading.frame(width: 420)
-                trailing.frame(maxWidth: .infinity)
-            }
-        }
     }
 
     private var widthReader: some View {
