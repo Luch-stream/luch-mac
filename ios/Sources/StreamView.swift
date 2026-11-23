@@ -21,8 +21,14 @@ struct StreamView: View {
 
     var body: some View {
         NavigationStack {
-            videoPane
-                .ignoresSafeArea()
+            Group {
+                if padded {
+                    framedVideo
+                } else {
+                    videoPane
+                        .ignoresSafeArea()
+                }
+            }
                 .navigationTitle(viewer.senderName.isEmpty ? "Luch" : viewer.senderName)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -70,6 +76,18 @@ struct StreamView: View {
                 .sheet(isPresented: $settingsPresented) { SettingsView() }
         }
         .environment(\.colorScheme, .dark)
+    }
+
+    private var framedVideo: some View {
+        videoPane
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.5), radius: 30, y: 16)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 22)
     }
 
     private var videoPane: some View {
@@ -480,6 +498,18 @@ private struct DuoStreamLayout: View {
             }
         }
         .fixedSize()
+    }
+
+    private var framedVideo: some View {
+        videoPane
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.5), radius: 30, y: 16)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 22)
     }
 
     private var videoPane: some View {

@@ -17,8 +17,13 @@ struct HomeView: View {
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var sending: Bool { pageIndex == 1 }
     private var deviceName: String { UIDevice.current.name }
+    /// The Android client switches to two columns at 840 dp; we use the same number.
+    @State private var width: CGFloat = 0
+    private var wide: Bool { width >= 840 }
 
     /// Both cards are this tall, so the dots and the container below never move.
     private let cardHeight: CGFloat = 322
@@ -27,28 +32,51 @@ struct HomeView: View {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
+            GeometryReader { proxy in
+                Color.clear.onAppear { width = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, new in width = new }
+            }
+
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     header
                         .padding(.horizontal, 20)
 
-                    // Full-bleed pager: the card keeps its margins inside, but a swipe that starts
-                    // at the screen edge still lands on the page instead of the parent scroller.
-                    TabView(selection: $pageIndex) {
-                        receiveCard.tag(0)
-                        sendCard.tag(1)
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(height: cardHeight)
+                    if wide {
+                        HStack(alignment: .top, spacing: 18) {
+                            VStack(spacing: 14) {
+                                TabView(selection: $pageIndex) {
+                                    receiveCard.tag(0)
+                                    sendCard.tag(1)
+                                }
+                                .tabViewStyle(.page(indexDisplayMode: .always))
+                                .indexViewStyle(.page(backgroundDisplayMode: .never))
+                                .frame(height: cardHeight)
+                            }
+                            .frame(width: 420)
 
-                    PageDots(index: $pageIndex, count: 2)
-
-                    bottomContainer
+                            bottomContainer
+                                .frame(maxWidth: .infinity)
+                        }
                         .padding(.horizontal, 20)
+                    } else {
+                        // Full-bleed pager: the card keeps its margins inside, but a swipe that
+                        // starts at the screen edge still lands on the page.
+                        TabView(selection: $pageIndex) {
+                            receiveCard.tag(0)
+                            sendCard.tag(1)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .always))
+                        .indexViewStyle(.page(backgroundDisplayMode: .never))
+                        .frame(height: cardHeight)
+
+                        bottomContainer
+                            .padding(.horizontal, 20)
+                    }
                 }
                 .padding(.top, 6)
                 .padding(.bottom, 28)
-                .frame(maxWidth: 520)
+                .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -69,6 +97,15 @@ struct HomeView: View {
 
     // MARK: - header
 
+    private var modeSwitcher: some View {
+        Picker("Режим", selection: $pageIndex) {
+            Text("Принимать").tag(0)
+            Text("Отправлять").tag(1)
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             Image("LuchMark")
@@ -84,7 +121,18 @@ struct HomeView: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(LuchStyle.accent)
 
-            Spacer(minLength: 0)
+            if wide {
+                Spacer(minLength: 0)
+                modeSwitcher
+                Spacer(minLength: 0)
+                Text(deviceName)
+                    .font(.footnote)
+                    .foregroundStyle(LuchStyle.secondaryText)
+                    .lineLimit(1)
+                    .frame(maxWidth: 200, alignment: .trailing)
+            } else {
+                Spacer(minLength: 0)
+            }
 
             Button(action: onSettings) {
                 Image(systemName: "gearshape.fill")
@@ -126,6 +174,7 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
+        .padding(.bottom, 20)
     }
 
     private var sendCard: some View {
@@ -176,6 +225,7 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
+        .padding(.bottom, 20)
     }
 
     private func cardIcon(_ symbol: String) -> some View {

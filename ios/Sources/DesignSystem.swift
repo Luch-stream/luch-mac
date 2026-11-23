@@ -11,12 +11,15 @@ enum LuchStyle {
     /// #99000000 — black at 60%, the floating HUD colour over video.
     static let panel = Color.black.opacity(0.6)
     /// #F8B858 — the gold accent: the mark, the live dot and the primary action.
-    static let accent = Color(red: 248.0 / 255, green: 184.0 / 255, blue: 88.0 / 255)
-    static let primaryText = Color.white
-    /// #CCFFFFFF — white at 80%, the secondary text.
-    static let secondaryText = Color.white.opacity(0.8)
-    /// #FFFFFF at 10% — dividers and hairline borders.
-    static let separator = Color.white.opacity(0.1)
+    static let accent = Color(red: 255.0 / 255, green: 186.0 / 255, blue: 95.0 / 255)
+    /// #E3E2E8 — the Android client does not use pure white, and neither should we.
+    static let primaryText = Color(red: 227.0 / 255, green: 226.0 / 255, blue: 232.0 / 255)
+    /// #C4C6D0 — muted text in the Android client.
+    static let secondaryText = Color(red: 196.0 / 255, green: 198.0 / 255, blue: 208.0 / 255)
+    /// #292A2F — cards that sit on top of other cards.
+    static let surfaceHigh = Color(red: 41.0 / 255, green: 42.0 / 255, blue: 47.0 / 255)
+    /// #47484D — dividers and outlines.
+    static let separator = Color(red: 71.0 / 255, green: 72.0 / 255, blue: 77.0 / 255)
     /// The live dot keeps the accent: the Android client paints its "receiving" icon gold.
     static let live = accent
     static let videoCorner: CGFloat = 30
@@ -204,25 +207,5 @@ struct AmbientBackdrop: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-    }
-}
-
-/// Page dots placed by the screen itself, so they can sit under the card instead of the screen edge.
-struct PageDots: View {
-    @Binding var index: Int
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(0..<count, id: \.self) { dot in
-                Circle()
-                    .fill(dot == index ? LuchStyle.accent : LuchStyle.primaryText.opacity(0.25))
-                    .frame(width: dot == index ? 8 : 7, height: dot == index ? 8 : 7)
-                    .animation(.easeInOut(duration: 0.2), value: index)
-            }
-        }
-        // An indicator, not a control: it must never eat a swipe or a tap meant for the card.
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
