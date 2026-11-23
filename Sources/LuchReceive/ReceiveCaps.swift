@@ -111,16 +111,34 @@ public enum ReceiveCaps {
             decoders.insert(videoPreference, at: 0)
         }
 
-        // No benchmark yet: the decoder list and the preferred codec are enough for both senders.
+        // Measurements from an earlier bench: the fastest decoder wins, and a codec later in the
+        // Android order has to be 0.5 ms faster, exactly as their Bench decides.
+        var measured: [String: Double] = [:]
+        for mime in decoders {
+            let ms = UserDefaults.standard.double(forKey: "decode.\(mime)")
+            if ms > 0 { measured[mime] = ms }
+        }
+        var preferred = decoders.first ?? (hevc ? "video/hevc" : "video/avc")
+        if let fastest = measured.min(by: { $0.value < $1.value }) {
+            preferred = fastest.key
+            for mime in decoders {
+                guard let ms = measured[mime], mime != fastest.key else { continue }
+                if ms < fastest.value - 0.5, let index = decoders.firstIndex(of: mime),
+                    let current = decoders.firstIndex(of: preferred), index < current
+                {
+                    preferred = mime
+                }
+            }
+        }
+
         var bench: [String: Any] = [
-            "prefer": decoders.first ?? (hevc ? "video/hevc" : "video/avc"),
+            "prefer": preferred,
             "res":
                 "\(screen.width > screen.height ? 1920 : 1080)x\(screen.width > screen.height ? 1080 : 1920)",
         ]
-        // Decode times from earlier sessions, so a sender starts from measurements, not guesses.
-        for mime in decoders {
-            let ms = UserDefaults.standard.double(forKey: "decode.\(mime)")
-            if ms > 0 { bench[mime] = ["ms": (ms * 10).rounded() / 10] }
+        // Decode times from the bench, so a sender starts from measurements, not guesses.
+        for (mime, ms) in measured {
+            bench[mime] = ["ms": (ms * 10).rounded() / 10]
         }
 
         return [

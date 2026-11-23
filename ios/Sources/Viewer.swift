@@ -48,6 +48,8 @@ final class Viewer {
     // MARK: - lifecycle
 
     func start() {
+        // First launch: find out how fast this phone decodes, so senders can pick the codec.
+        DecoderBench.runIfNeeded()
         if senderTask == nil {
             senderTask = Task { @MainActor [weak self] in
                 guard let self else { return }
