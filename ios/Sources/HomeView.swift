@@ -128,8 +128,10 @@ struct HomeView: View {
             subtitle: "Телефон виден в сети как «\(deviceName)»",
             footnote: nil,
             chips: [
-                [LocalAddress.preferred(), "Wi-Fi"].compactMap { $0 }.joined(separator: " · "),
-                "порт 47800", "HEVC", "PCM",
+                Chip(LocalAddress.preferred() ?? "без адреса", "wifi"),
+                Chip("47800", "number"),
+                Chip("HEVC", "video"),
+                Chip("PCM", "waveform"),
             ])
     }
 
@@ -140,10 +142,18 @@ struct HomeView: View {
             subtitle: chosen?.name ?? "Выберите приёмник ниже",
             footnote: sendStatus.isEmpty ? nil : sendStatus,
             footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent,
-            chips: chosen == nil
-                ? ["HEVC", "PCM", "порт 47800"]
-                : [chosen?.host ?? "", "порт \(chosen?.port ?? 0)", "HEVC", "PCM"]
-                    .filter { !$0.isEmpty })
+            chips: {
+                var list: [Chip] = []
+                if let chosen {
+                    list.append(Chip(chosen.host, "wifi"))
+                    list.append(Chip("\(chosen.port)", "number"))
+                } else {
+                    list.append(Chip("47800", "number"))
+                }
+                list.append(Chip("HEVC", "video"))
+                list.append(Chip("PCM", "waveform"))
+                return list
+            }())
     }
 
     @ViewBuilder
@@ -166,7 +176,7 @@ struct HomeView: View {
         subtitle: String,
         footnote: String?,
         footnoteTint: Color? = nil,
-        chips: [String] = []
+        chips: [Chip] = []
     ) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol)
@@ -184,7 +194,7 @@ struct HomeView: View {
                     .foregroundStyle(LuchStyle.secondaryText)
                 if !chips.isEmpty {
                     HStack(spacing: 6) {
-                        ForEach(chips, id: \.self) { chip($0) }
+                        ForEach(chips) { chip($0) }
                     }
                     .padding(.top, 4)
                 }
@@ -312,16 +322,34 @@ struct HomeView: View {
         }
     }
 
-    /// A small capsule for a fact that reads as a tag: port, codec, audio.
-    private func chip(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(LuchStyle.secondaryText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(LuchStyle.background, in: Capsule())
-            .overlay { Capsule().strokeBorder(LuchStyle.separator, lineWidth: 1) }
-            .fixedSize()
+    /// A fact that reads as a tag: address, port, codec, audio.
+    struct Chip: Identifiable {
+        let text: String
+        let symbol: String?
+        var id: String { text }
+
+        init(_ text: String, _ symbol: String? = nil) {
+            self.text = text
+            self.symbol = symbol
+        }
+    }
+
+    private func chip(_ chip: Chip) -> some View {
+        HStack(spacing: 5) {
+            if let symbol = chip.symbol {
+                Image(systemName: symbol)
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            Text(chip.text)
+                .font(.caption)
+        }
+        .foregroundStyle(LuchStyle.secondaryText)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(LuchStyle.background, in: Capsule())
+        .overlay { Capsule().strokeBorder(LuchStyle.separator, lineWidth: 1) }
+        .fixedSize()
     }
 
     // MARK: - actions
