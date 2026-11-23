@@ -25,19 +25,15 @@ struct HomeView: View {
     private var sideBySide: Bool { horizontalSizeClass == .regular }
 
     var body: some View {
-        TabView(selection: $pageIndex) {
-            receiveTab
-                .tabItem { Label("Принимать", systemImage: "wifi") }
-                .tag(0)
-
-            sendTab
-                .tabItem { Label("Отправлять", systemImage: "rectangle.dashed.badge.record") }
-                .tag(1)
+        Group {
+            if wideLayout {
+                splitHome
+            } else {
+                tabsHome
+            }
         }
         .tint(LuchStyle.accent)
-        // iPhone keeps the tab bar; iPad and the Duo put the two modes in the sidebar, where they
-        // do not fight the navigation bar.
-        .tabViewStyle(.sidebarAdaptable)
+        .background(LuchStyle.background)
         .task {
             configServer.onStatus = { line in sendStatus = line }
             configServer.start()
@@ -53,76 +49,94 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - tabs
+    /// A phone switches modes with the tab bar; a tablet or a folded-open Duo keeps them in the
+    /// split view's sidebar, where nothing floats over the navigation bar.
+    private var wideLayout: Bool { horizontalSizeClass == .regular }
 
-    private var receiveTab: some View {
-        Group {
-            if sideBySide {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    List { receiveStatus }
-                        .navigationTitle("Luch")
-                        .toolbar { settingsItem }
-                } detail: {
-                    sendersCollection
-                        .navigationTitle("Отправители рядом")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            receiveStatus
-                                .padding(.horizontal, 20)
-                            sendersCollection
-                        }
-                        .padding(.vertical, 12)
-                    }
-                    .background(LuchStyle.background)
+    private var tabsHome: some View {
+        TabView(selection: $pageIndex) {
+            NavigationStack {
+                receiveScreen
                     .navigationTitle("Luch")
                     .navigationBarTitleDisplayMode(.large)
                     .toolbar { settingsItem }
+            }
+            .tabItem { Label("Принимать", systemImage: "wifi") }
+            .tag(0)
+
+            NavigationStack {
+                sendScreen
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
+            }
+            .tabItem { Label("Отправлять", systemImage: "rectangle.dashed.badge.record") }
+            .tag(1)
+        }
+    }
+
+    private var splitHome: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List {
+                modeRow(0, "Принимать", "wifi")
+                modeRow(1, "Отправлять", "rectangle.dashed.badge.record")
+            }
+            .navigationTitle("Luch")
+            .toolbar { settingsItem }
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 320)
+        } detail: {
+            if pageIndex == 0 {
+                receiveScreen
+                    .navigationTitle("Отправители рядом")
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                sendScreen
+                    .navigationTitle("Приёмники рядом")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    /// A mode in the split view's sidebar: a row with a checkmark, the way a sidebar selection looks.
+    private func modeRow(_ index: Int, _ title: String, _ symbol: String) -> some View {
+        Button {
+            pageIndex = index
+        } label: {
+            HStack {
+                Label(title, systemImage: symbol)
+                    .foregroundStyle(LuchStyle.primaryText)
+                Spacer(minLength: 0)
+                if pageIndex == index {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(LuchStyle.accent)
                 }
             }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var receiveScreen: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                receiveStatus
+                sendersCollection
+            }
+            .padding(20)
         }
         .background(LuchStyle.background)
     }
 
-    private var sendTab: some View {
-        Group {
-            if sideBySide {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    List {
-                        brandRow
-                        sendStatusRow
-                        startSection
-                    }
-                    .navigationTitle(Text(Image("LuchMark")) + Text("  Luch"))
-                    .toolbar { settingsItem }
-                } detail: {
-                    targetsCollection
-                        .navigationTitle("Приёмники рядом")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            sendStatusRow
-                                .padding(.horizontal, 20)
-                            startSection
-                                .padding(.horizontal, 20)
-                            targetsCollection
-                        }
-                        .padding(.vertical, 12)
-                    }
-                    .background(LuchStyle.background)
-                    .navigationTitle("Luch")
-                    .navigationBarTitleDisplayMode(.large)
-                    .toolbar { settingsItem }
-                }
+    private var sendScreen: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                sendStatusRow
+                startSection
+                targetsCollection
             }
+            .padding(20)
         }
         .background(LuchStyle.background)
     }
@@ -207,7 +221,7 @@ struct HomeView: View {
     // MARK: - collections
 
     private var sendersCollection: some View {
-        ScrollView {
+        Group {
             if viewer.senders.isEmpty {
                 emptyState(
                     title: "Пока не найдены",
@@ -223,15 +237,13 @@ struct HomeView: View {
                             selected: false)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
         }
-        .background(LuchStyle.background)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var targetsCollection: some View {
-        ScrollView {
+        Group {
             if targets.isEmpty {
                 emptyState(
                     title: "Пока не найдены",
@@ -253,11 +265,9 @@ struct HomeView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
         }
-        .background(LuchStyle.background)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Adaptive columns: the grid decides how many cards fit, as HIG asks for a collection.
