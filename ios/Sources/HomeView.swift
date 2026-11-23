@@ -46,8 +46,8 @@ struct HomeView: View {
                         HStack(alignment: .top, spacing: 18) {
                             VStack(spacing: 14) {
                                 TabView(selection: $pageIndex) {
-                                    receiveCard.tag(0)
-                                    sendCard.tag(1)
+                                    receiveCard.tag(0).frame(height: cardHeight)
+                                    sendCard.tag(1).frame(height: cardHeight)
                                 }
                                 .tabViewStyle(.page(indexDisplayMode: .never))
                                 .frame(height: cardHeight)
@@ -65,8 +65,8 @@ struct HomeView: View {
                         // Full-bleed pager: the card keeps its margins inside, but a swipe that
                         // starts at the screen edge still lands on the page.
                         TabView(selection: $pageIndex) {
-                            receiveCard.tag(0)
-                            sendCard.tag(1)
+                            receiveCard.tag(0).frame(height: cardHeight)
+                            sendCard.tag(1).frame(height: cardHeight)
                         }
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         .frame(height: cardHeight)
