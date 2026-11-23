@@ -89,7 +89,7 @@ enum CodecChoice {
             var score = codec == .hevc ? weights.efficiency : weights.compatibility
             if prefer == mime { score += weights.preferBonusMs * weights.perMs }
             if let caps = hw[mime] as? [String: Any] {
-                score += (caps["full_hd_60"] as? Bool ?? false)
+                score += (caps["1080p60"] as? Bool ?? false)
                     ? weights.fullHD60 : weights.fullHD60Missing
                 if caps["low_latency"] as? Bool ?? false { score += weights.lowLatency }
             }
