@@ -133,15 +133,26 @@ final class SendSession: @unchecked Sendable {
     private func handle(_ message: [String: Any]) {
         switch message["t"] as? String {
         case "welcome":
+            // Audio only if the receiver says it can play raw PCM; otherwise the session is
+            // picture-only rather than a promise the sender never keeps.
+            let decoders = message["decoders"] as? [String] ?? []
+            let hw = message["hw"] as? [String: Any]
+            let audioCodecs = hw?["audio"] as? [String] ?? []
+            wantsAudio = audioCodecs.contains("audio/pcm") || decoders.contains("audio/pcm")
             if let start = pendingStart {
-                send([
+                var startMessage: [String: Any] = [
                     "t": "start", "mode": "mirror",
                     "video": [
                         "codec": "video/hevc", "width": start.width, "height": start.height,
                         "fps": start.fps,
                     ],
-                    "audio": ["codec": "audio/pcm", "rate": 48_000, "channels": 2, "frame_ms": 5],
-                ])
+                ]
+                if wantsAudio {
+                    startMessage["audio"] = [
+                        "codec": "audio/pcm", "rate": 48_000, "channels": 2, "frame_ms": 5,
+                    ]
+                }
+                send(startMessage)
             }
         case "ready":
             videoPort = UInt16(message["video_port"] as? Int ?? 0)
@@ -174,6 +185,8 @@ final class SendSession: @unchecked Sendable {
 
     /// Set when the receiver asks for a fresh IDR; the encoder reads and clears it.
     var wantKeyframe = false
+    /// The receiver accepted PCM audio in its welcome.
+    private(set) var wantsAudio = false
 
     func sendVideo(_ frame: [UInt8], ptsUS: UInt32, keyframe: Bool) {
         lock.lock()
@@ -183,6 +196,7 @@ final class SendSession: @unchecked Sendable {
     }
 
     func sendAudio(_ frame: [UInt8], ptsUS: UInt32) {
+        guard wantsAudio else { return }
         lock.lock()
         defer { lock.unlock() }
         guard audioSocket >= 0 else { return }

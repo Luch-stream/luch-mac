@@ -14,6 +14,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     /// Kept open after the handshake so the app can show what the broadcast is doing.
     private var statusSocket: Int32 = -1
     private var frameTick = 0
+    private let pcm = PcmFramer()
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         // The size comes from the first frame: hardcoding it would letterbox or crop on any other
@@ -52,14 +53,22 @@ final class SampleHandler: RPBroadcastSampleHandler {
         }
         report("кодирую \(outWidth)x\(outHeight) → \(target.host):\(target.port)")
         session.start(to: target, name: "iPhone", width: outWidth, height: outHeight, fps: 30)
+        pcm.onFrame = { [weak session] frame, pts in
+            session?.sendAudio(frame, ptsUS: pts)
+        }
         self.encoder = encoder
         self.session = session
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
+        guard started else { return }
+        if sampleBufferType == .audioApp || sampleBufferType == .audioMic {
+            pcm.push(sampleBuffer)
+            return
+        }
         // Only every other frame is encoded: the extension is memory- and CPU-capped.
         frameTick += 1
-        guard started, sampleBufferType == .video, frameTick % 2 == 0 else { return }
+        guard sampleBufferType == .video, frameTick % 2 == 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if encoder == nil {
             startEncoding(
