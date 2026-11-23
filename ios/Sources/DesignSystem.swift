@@ -232,3 +232,51 @@ enum LuchType {
     static let statValueSmall = Font.title3
     static let statUnit = Font.callout
 }
+
+/// A row that wraps onto the next line when it runs out of width — the layout Apple documents for
+/// tags and chips. Each element keeps its own size; nothing is squeezed or cut.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var lineWidth: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var total = CGSize(width: 0, height: 0)
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if lineWidth > 0, lineWidth + spacing + size.width > maxWidth {
+                total.width = max(total.width, lineWidth)
+                total.height += lineHeight + lineSpacing
+                lineWidth = size.width
+                lineHeight = size.height
+            } else {
+                lineWidth += lineWidth == 0 ? size.width : spacing + size.width
+                lineHeight = max(lineHeight, size.height)
+            }
+        }
+        total.width = max(total.width, lineWidth)
+        total.height += lineHeight
+        return total
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}

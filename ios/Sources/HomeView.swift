@@ -177,7 +177,8 @@ struct HomeView: View {
                     .font(.subheadline)
                     .foregroundStyle(LuchStyle.secondaryText)
                 if !chips.isEmpty {
-                    HStack(spacing: 6) {
+                    // Chips wrap instead of being cut off by the pane's edge, each at its own width.
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(chips) { chip($0) }
                     }
                     .padding(.top, 4)
