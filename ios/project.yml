@@ -10,11 +10,20 @@ targets:
   LuchiOS:
     type: application
     platform: iOS
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/OpusShim.h
     sources:
       - path: Sources
         excludes: [Broadcast]
       - Assets.xcassets
     dependencies:
+      - framework: Frameworks/opus.xcframework
+        embed: false
+    dependencies:
+      - framework: Frameworks/opus.xcframework
+        embed: false
+        codeSign: false
       - package: Luch
         product: LuchReceive
       - package: Luch
@@ -51,6 +60,8 @@ targets:
     platform: iOS
     sources: [Sources/SendCore, Sources/Broadcast]
     dependencies:
+      - framework: Frameworks/opus.xcframework
+        embed: false
       - package: Luch
         product: LuchProto
     settings:
@@ -62,3 +73,4 @@ targets:
         INFOPLIST_FILE: Broadcast/Info.plist
         SWIFT_VERSION: "6.0"
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/OpusShim.h
