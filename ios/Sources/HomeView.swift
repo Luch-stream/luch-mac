@@ -60,6 +60,9 @@ struct HomeView: View {
                         }
                         .padding(.horizontal, 20)
                     } else {
+                        // The phone keeps the explicit switcher too, above the card it pages.
+                        modeSwitcher
+                            .padding(.horizontal, 20)
                         // Full-bleed pager: the card keeps its margins inside, but a swipe that
                         // starts at the screen edge still lands on the page.
                         TabView(selection: $pageIndex) {
