@@ -18,7 +18,13 @@ enum CodecChoice {
         var lowLatency = 5.0
     }
 
-    /// The best pair for this session, from the receiver's welcome and what we can encode.
+    /// Android's Bench orders codecs this way when they decode about as fast: the more senders can
+    /// encode a codec, the better. VP9 and AV1 are listed there too; this phone cannot encode them,
+    /// so they never become candidates here.
+    private static let order = ["video/avc", "video/hevc"]
+
+    /// The best pair for this session: the receiver's fastest decoder that this phone can encode.
+    /// A codec lower in the order has to win by 0.5 ms, exactly as the Android bench decides.
     static func video(from welcome: [String: Any], weights: Weights = Weights())
         -> ScreenEncoder.Codec
     {
@@ -28,34 +34,68 @@ enum CodecChoice {
         let hw = (welcome["hw"] as? [String: Any])?["video"] as? [String: Any] ?? [:]
         let encodable = Set(DeviceCapabilities.videoEncoders)
 
-        var best: (codec: ScreenEncoder.Codec, score: Double)?
-        for mime in decoders where encodable.contains(mime) {
-            let codec: ScreenEncoder.Codec = mime == "video/hevc" ? .hevc : .avc
-            var score = 0.0
-            score += codec == .hevc ? weights.efficiency : weights.compatibility
-
-            let entry = bench[mime] as? [String: Any]
-            let ms = (entry?["ms"] as? Double) ?? (hw[mime] as? [String: Any]).flatMap(msFrom)
-            if let ms {
-                score += (weights.baselineMs - ms) * weights.perMs
-                if prefer == mime { score += weights.preferBonusMs * weights.perMs }
-            } else if prefer == mime {
-                score += weights.preferBonusMs * weights.perMs
+        var measured: [String: Double] = [:]
+        for mime in order where decoders.contains(mime) && encodable.contains(mime) {
+            if let ms = (bench[mime] as? [String: Any]).flatMap(measuredMs)
+                ?? (hw[mime] as? [String: Any]).flatMap(msFrom)
+            {
+                measured[mime] = ms
             }
+        }
 
-            let caps = hw[mime] as? [String: Any]
-            if let caps {
+        if let fastest = measured.min(by: { $0.value < $1.value }) {
+            var winner = fastest.key
+            for mime in order where mime != winner {
+                if let ms = measured[mime], ms < fastest.value - 0.5,
+                    orderIndex(mime) < orderIndex(winner)
+                {
+                    winner = mime
+                }
+            }
+            // The receiver's own answer settles a tie it takes part in.
+            if let prefer, prefer != winner, let preferMs = measured[prefer],
+                let winnerMs = measured[winner], preferMs < winnerMs - 0.5
+            {
+                winner = prefer
+            }
+            return winner == "video/hevc" ? .hevc : .avc
+        }
+
+        // Nothing measured: fall back to the receiver's word, then to the weighted score.
+        if let prefer, decoders.contains(prefer), encodable.contains(prefer) {
+            return prefer == "video/hevc" ? .hevc : .avc
+        }
+        return weighted(decoders: decoders, bench: bench, hw: hw, encodable: encodable, weights: weights)
+    }
+
+    private static func orderIndex(_ mime: String) -> Int {
+        order.firstIndex(of: mime) ?? order.count
+    }
+
+    private static func measuredMs(_ entry: [String: Any]) -> Double? {
+        entry["ms"] as? Double
+    }
+
+    /// No measurement at all: HEVC saves bits, H.264 reaches further, and 1080p60 or a low-latency
+    /// decoder breaks the tie.
+    private static func weighted(
+        decoders: [String], bench: [String: Any], hw: [String: Any], encodable: Set<String>,
+        weights: Weights
+    ) -> ScreenEncoder.Codec {
+        let prefer = bench["prefer"] as? String
+        var best: (codec: ScreenEncoder.Codec, score: Double)?
+        for mime in order where decoders.contains(mime) && encodable.contains(mime) {
+            let codec: ScreenEncoder.Codec = mime == "video/hevc" ? .hevc : .avc
+            var score = codec == .hevc ? weights.efficiency : weights.compatibility
+            if prefer == mime { score += weights.preferBonusMs * weights.perMs }
+            if let caps = hw[mime] as? [String: Any] {
                 score += (caps["full_hd_60"] as? Bool ?? false)
                     ? weights.fullHD60 : weights.fullHD60Missing
                 if caps["low_latency"] as? Bool ?? false { score += weights.lowLatency }
             }
-
-            if best == nil || score > best!.score {
-                best = (codec, score)
-            }
+            if best == nil || score > best!.score { best = (codec, score) }
         }
-        // Nothing in common: HEVC if this phone can, so the picture still goes out.
-        return best?.codec ?? (DeviceCapabilities.videoEncoders.contains("video/hevc") ? .hevc : .avc)
+        return best?.codec ?? (encodable.contains("video/hevc") ? .hevc : .avc)
     }
 
     private static func msFrom(_ entry: [String: Any]) -> Double? {
