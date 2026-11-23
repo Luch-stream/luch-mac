@@ -127,12 +127,7 @@ struct HomeView: View {
             title: "Готов принимать",
             subtitle: "Телефон виден в сети как «\(deviceName)»",
             footnote: nil,
-            chips: [
-                Chip(LocalAddress.preferred() ?? "без адреса", "wifi"),
-                Chip("47800", "number"),
-                Chip("HEVC", "video"),
-                Chip("PCM", "waveform"),
-            ])
+            chips: receiveChips)
     }
 
     private var sendStatusRow: some View {
@@ -142,18 +137,7 @@ struct HomeView: View {
             subtitle: chosen?.name ?? "Выберите приёмник ниже",
             footnote: sendStatus.isEmpty ? nil : sendStatus,
             footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent,
-            chips: {
-                var list: [Chip] = []
-                if let chosen {
-                    list.append(Chip(chosen.host, "wifi"))
-                    list.append(Chip("\(chosen.port)", "number"))
-                } else {
-                    list.append(Chip("47800", "number"))
-                }
-                list.append(Chip("HEVC", "video"))
-                list.append(Chip("PCM", "waveform"))
-                return list
-            }())
+            chips: sendChips)
     }
 
     @ViewBuilder
@@ -308,6 +292,42 @@ struct HomeView: View {
                     lineWidth: selected ? 2 : 1)
         }
         .contentShape(Rectangle())
+    }
+
+    // MARK: - chips
+
+    /// What we can play, from the same list the receiver advertises.
+    private var receiveChips: [Chip] {
+        var chips = [
+            Chip(LocalAddress.preferred() ?? "без адреса", "wifi"),
+            Chip("47800", "number"),
+        ]
+        for label in DeviceCapabilities.labels(for: DeviceCapabilities.videoDecoders) {
+            chips.append(Chip(label, label == "HEVC" ? "video" : "film"))
+        }
+        for label in DeviceCapabilities.labels(for: DeviceCapabilities.audio) {
+            chips.append(Chip(label, "waveform"))
+        }
+        return chips
+    }
+
+    /// What we can send. The receiver's own answer arrives with its welcome, and the extension
+    /// picks the codec from it, so these are our side of the bargain.
+    private var sendChips: [Chip] {
+        var chips: [Chip] = []
+        if let chosen {
+            chips.append(Chip(chosen.host, "wifi"))
+            chips.append(Chip("\(chosen.port)", "number"))
+        } else {
+            chips.append(Chip("47800", "number"))
+        }
+        for label in DeviceCapabilities.labels(for: DeviceCapabilities.videoEncoders) {
+            chips.append(Chip(label, label == "HEVC" ? "video" : "film"))
+        }
+        for label in DeviceCapabilities.labels(for: DeviceCapabilities.audio) {
+            chips.append(Chip(label, "waveform"))
+        }
+        return chips
     }
 
     // MARK: - pieces
