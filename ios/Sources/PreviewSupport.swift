@@ -4,16 +4,6 @@
 #if DEBUG
 import SwiftUI
 
-#Preview("Главный — принимать") {
-    HomeView(viewer: .previewReceivingSenders, pageIndex: .constant(0), onSettings: {})
-        .preferredColorScheme(.dark)
-}
-
-#Preview("Главный — отправлять") {
-    HomeView(viewer: .previewReceivingSenders, pageIndex: .constant(1), onSettings: {})
-        .preferredColorScheme(.dark)
-}
-
 #Preview("Трансляция") {
     StreamView(viewer: .previewStreaming, settingsPresented: .constant(false))
         .preferredColorScheme(.dark)
@@ -36,7 +26,7 @@ import SwiftUI
         .preferredColorScheme(.dark)
 }
 
-private extension Viewer {
+extension Viewer {
     static var previewReceivingSenders: Viewer {
         let viewer = Viewer()
         viewer.seedPreviewSenders(["MacBook Pro — iQQator", "S24+ пользователя Павел"])

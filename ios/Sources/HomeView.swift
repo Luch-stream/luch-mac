@@ -42,29 +42,18 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
-        ZStack {
-            LuchStyle.background.ignoresSafeArea()
-
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        width = proxy.size.width
-                        foldMid = Self.foldCentre(in: proxy)
-                    }
-                    .onChange(of: proxy.size.width) { _, new in
-                        width = new
-                        foldMid = Self.foldCentre(in: proxy)
-                    }
-            }
-
+        NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
-                    header
-
                     modeSwitcher
                         .frame(maxWidth: foldWidth)
 
                     if wide {
+                        Text(deviceName)
+                            .font(.footnote)
+                            .foregroundStyle(LuchStyle.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
                         HStack(alignment: .top, spacing: 18) {
                             cardColumn
                                 .frame(width: 420)
@@ -87,10 +76,36 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 0)
                 .padding(.bottom, 28)
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
+            }
+            .background(LuchStyle.background.ignoresSafeArea())
+            .navigationTitle("Luch")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundStyle(LuchStyle.primaryText)
+                    }
+                    .accessibilityLabel("Настройки")
+                }
+            }
+            .toolbarBackground(LuchStyle.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                    .onAppear {
+                        width = proxy.size.width
+                        foldMid = Self.foldCentre(in: proxy)
+                    }
+                    .onChange(of: proxy.size.width) { _, new in
+                        width = new
+                        foldMid = Self.foldCentre(in: proxy)
+                    }
+                }
             }
         }
         .onPreferenceChange(CardHeightKey.self) { heights in
@@ -436,3 +451,10 @@ struct HomeView: View {
     }
 
 }
+
+#if DEBUG
+#Preview {
+    HomeView(viewer: .previewReceivingSenders, pageIndex: .constant(0), onSettings: {})
+        .preferredColorScheme(.dark)
+}
+#endif
