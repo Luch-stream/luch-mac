@@ -105,7 +105,8 @@ struct HomeView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.large)
-        .frame(maxWidth: 320)
+        // Phone: the full safe-area width. Wide: a comfortable fixed width, centred.
+        .frame(maxWidth: wide ? 320 : .infinity)
     }
 
     private var header: some View {
