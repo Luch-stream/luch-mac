@@ -1,6 +1,6 @@
-// The home screen: two tabs, one per mode. Each is a NavigationSplitView — the system's own two-pane
-// container — so the panes are placed by iOS (around the fold, with its own column widths), and the
-// app only says what goes on the left and what goes on the right.
+// The home screen: two tabs, one per mode. Wide screens put the status beside the collection in a
+// NavigationSplitView; a narrow (vertical) screen stacks them — status first, collection below.
+// Both layouts are made of standard parts: List rows for the status, an adaptive grid for devices.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 import UIKit
@@ -16,10 +16,13 @@ struct HomeView: View {
     @State private var configServer = ConfigServer()
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
-    /// Both panes stay visible; the divider is where a fold lands.
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var deviceName: String { UIDevice.current.name }
+    /// Wide: side by side. Narrow: the collection sits under the status.
+    private var sideBySide: Bool { horizontalSizeClass == .regular }
 
     var body: some View {
         TabView(selection: $pageIndex) {
@@ -50,117 +53,209 @@ struct HomeView: View {
     // MARK: - tabs
 
     private var receiveTab: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List {
-                Section {
-                    statusRow(
-                        symbol: "wifi",
-                        title: "Готов принимать",
-                        subtitle: "Телефон виден в сети как «\(deviceName)»",
-                        footnote: [LocalAddress.preferred(), "Wi-Fi", "порт 47800"]
-                            .compactMap { $0 }.joined(separator: " · "))
+        Group {
+            if sideBySide {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    List { receiveStatus }
+                        .navigationTitle("Luch")
+                        .toolbar { settingsItem }
+                } detail: {
+                    sendersCollection
                 }
-            }
-            .navigationTitle("Luch")
-            .toolbar { settingsItem }
-        } detail: {
-            ScrollView {
-                if viewer.senders.isEmpty {
-                    ContentUnavailableView(
-                        "Пока не найдены",
-                        systemImage: "laptopcomputer",
-                        description: Text("Откройте Luch на компьютере в этой же сети"))
-                        .padding(.top, 80)
-                } else {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(viewer.senders) { sender in
-                            deviceCard(
-                                symbol: "laptopcomputer",
-                                title: sender.name,
-                                subtitle: "Luch",
-                                selected: false)
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            receiveStatus
+                                .padding(.horizontal, 20)
+                            sendersCollection
                         }
+                        .padding(.vertical, 12)
                     }
-                    .padding(20)
+                    .background(LuchStyle.background)
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
                 }
             }
-            .background(LuchStyle.background)
-            .navigationTitle("Отправители рядом")
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .navigationSplitViewStyle(.balanced)
-        .scrollContentBackground(.hidden)
         .background(LuchStyle.background)
     }
 
     private var sendTab: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List {
-                Section {
-                    statusRow(
-                        symbol: "rectangle.dashed.badge.record",
-                        title: chosen == nil ? "Куда показывать" : "Показываем на",
-                        subtitle: chosen?.name ?? "Выберите приёмник справа",
-                        footnote: sendStatus.isEmpty ? nil : sendStatus,
-                        footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent)
-                }
-
-                if let chosen {
-                    Section {
-                        Button {
-                            BroadcastStarter.present(target: chosen)
-                        } label: {
-                            Text("Начать трансляцию")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+        Group {
+            if sideBySide {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    List {
+                        sendStatusRow
+                        startSection
                     }
+                    .navigationTitle("Luch")
+                    .toolbar { settingsItem }
+                } detail: {
+                    targetsCollection
+                }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            sendStatusRow
+                                .padding(.horizontal, 20)
+                            startSection
+                                .padding(.horizontal, 20)
+                            targetsCollection
+                        }
+                        .padding(.vertical, 12)
+                    }
+                    .background(LuchStyle.background)
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
                 }
             }
-            .navigationTitle("Luch")
-            .toolbar { settingsItem }
-        } detail: {
-            ScrollView {
-                if targets.isEmpty {
-                    ContentUnavailableView(
-                        "Пока не найдены",
-                        systemImage: "display",
-                        description: Text("Приёмник должен быть в этой же сети"))
-                        .padding(.top, 80)
-                } else {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(targets) { target in
-                            Button {
-                                chosen = target
-                                prepare(target)
-                            } label: {
-                                deviceCard(
-                                    symbol: "display",
-                                    title: target.name,
-                                    subtitle: "Luch",
-                                    selected: chosen?.id == target.id)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(20)
-                }
-            }
-            .background(LuchStyle.background)
-            .navigationTitle("Приёмники рядом")
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .navigationSplitViewStyle(.balanced)
-        .scrollContentBackground(.hidden)
         .background(LuchStyle.background)
     }
 
-    // MARK: - pieces
+    // MARK: - status
+
+    private var receiveStatus: some View {
+        statusCard(
+            symbol: "wifi",
+            title: "Готов принимать",
+            subtitle: "Телефон виден в сети как «\(deviceName)»",
+            footnote: [LocalAddress.preferred(), "Wi-Fi", "порт 47800"]
+                .compactMap { $0 }.joined(separator: " · "))
+    }
+
+    private var sendStatusRow: some View {
+        statusCard(
+            symbol: "rectangle.dashed.badge.record",
+            title: chosen == nil ? "Куда показывать" : "Показываем на",
+            subtitle: chosen?.name ?? "Выберите приёмник ниже",
+            footnote: sendStatus.isEmpty ? nil : sendStatus,
+            footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent)
+    }
+
+    @ViewBuilder
+    private var startSection: some View {
+        if let chosen {
+            Button {
+                BroadcastStarter.present(target: chosen)
+            } label: {
+                Text("Начать трансляцию")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+    }
+
+    private func statusCard(
+        symbol: String,
+        title: String,
+        subtitle: String,
+        footnote: String?,
+        footnoteTint: Color? = nil
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(LuchStyle.accent)
+                .frame(width: 34, alignment: .center)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(LuchStyle.primaryText)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(LuchStyle.secondaryText)
+                if let footnote {
+                    Text(footnote)
+                        .font(.caption)
+                        .foregroundStyle(footnoteTint ?? LuchStyle.secondaryText)
+                        .padding(.top, 2)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - collections
+
+    private var sendersCollection: some View {
+        ScrollView {
+            if viewer.senders.isEmpty {
+                emptyState(
+                    title: "Пока не найдены",
+                    symbol: "laptopcomputer",
+                    message: "Откройте Luch на компьютере в этой же сети")
+            } else {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(viewer.senders) { sender in
+                        deviceCard(
+                            symbol: "laptopcomputer",
+                            title: sender.name,
+                            subtitle: "Luch",
+                            selected: false)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+        }
+        .background(LuchStyle.background)
+        .navigationTitle("Отправители рядом")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var targetsCollection: some View {
+        ScrollView {
+            if targets.isEmpty {
+                emptyState(
+                    title: "Пока не найдены",
+                    symbol: "display",
+                    message: "Приёмник должен быть в этой же сети")
+            } else {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(targets) { target in
+                        Button {
+                            chosen = target
+                            prepare(target)
+                        } label: {
+                            deviceCard(
+                                symbol: "display",
+                                title: target.name,
+                                subtitle: "Luch",
+                                selected: chosen?.id == target.id)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+        }
+        .background(LuchStyle.background)
+        .navigationTitle("Приёмники рядом")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 
     /// Adaptive columns: the grid decides how many cards fit, as HIG asks for a collection.
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 220), spacing: 12)]
+    }
+
+    private func emptyState(title: String, symbol: String, message: String) -> some View {
+        ContentUnavailableView(
+            title, systemImage: symbol, description: Text(message))
+            .padding(.top, 60)
     }
 
     private func deviceCard(
@@ -191,6 +286,8 @@ struct HomeView: View {
         .contentShape(Rectangle())
     }
 
+    // MARK: - pieces
+
     private var settingsItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: onSettings) {
@@ -199,40 +296,6 @@ struct HomeView: View {
             }
             .accessibilityLabel("Настройки")
         }
-    }
-
-    /// A status line: a symbol, the mode, what it means, and a small footnote.
-    private func statusRow(
-        symbol: String,
-        title: String,
-        subtitle: String,
-        footnote: String?,
-        footnoteTint: Color? = nil
-    ) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(LuchStyle.accent)
-                .frame(width: 34, alignment: .center)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(LuchStyle.primaryText)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(LuchStyle.secondaryText)
-                if let footnote {
-                    Text(footnote)
-                        .font(.caption)
-                        .foregroundStyle(footnoteTint ?? LuchStyle.secondaryText)
-                        .padding(.top, 2)
-                }
-            }
-        }
-        .padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - actions
