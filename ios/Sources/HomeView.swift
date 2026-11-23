@@ -35,6 +35,9 @@ struct HomeView: View {
                 .tag(1)
         }
         .tint(LuchStyle.accent)
+        // iPhone keeps the tab bar; iPad and the Duo put the two modes in the sidebar, where they
+        // do not fight the navigation bar.
+        .tabViewStyle(.sidebarAdaptable)
         .task {
             configServer.onStatus = { line in sendStatus = line }
             configServer.start()
@@ -61,6 +64,8 @@ struct HomeView: View {
                         .toolbar { settingsItem }
                 } detail: {
                     sendersCollection
+                        .navigationTitle("Отправители рядом")
+                        .navigationBarTitleDisplayMode(.inline)
                 }
                 .navigationSplitViewStyle(.balanced)
             } else {
@@ -88,13 +93,16 @@ struct HomeView: View {
             if sideBySide {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     List {
+                        brandRow
                         sendStatusRow
                         startSection
                     }
-                    .navigationTitle("Luch")
+                    .navigationTitle(Text(Image("LuchMark")) + Text("  Luch"))
                     .toolbar { settingsItem }
                 } detail: {
                     targetsCollection
+                        .navigationTitle("Приёмники рядом")
+                        .navigationBarTitleDisplayMode(.inline)
                 }
                 .navigationSplitViewStyle(.balanced)
             } else {
@@ -220,8 +228,6 @@ struct HomeView: View {
             }
         }
         .background(LuchStyle.background)
-        .navigationTitle("Отправители рядом")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var targetsCollection: some View {
@@ -252,8 +258,6 @@ struct HomeView: View {
             }
         }
         .background(LuchStyle.background)
-        .navigationTitle("Приёмники рядом")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     /// Adaptive columns: the grid decides how many cards fit, as HIG asks for a collection.
@@ -339,6 +343,27 @@ struct HomeView: View {
     }
 
     // MARK: - pieces
+
+    /// The mark leads the sidebar: the toolbar's leading and principal slots do not draw it in this
+    /// configuration, and a sign of the app belongs next to its name anyway.
+    private var brandRow: some View {
+        HStack(spacing: 10) {
+            Image("LuchMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(LuchStyle.accent)
+                .frame(width: 26, height: 26)
+                .accessibilityHidden(true)
+            Text("Luch")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(LuchStyle.accent)
+            Spacer(minLength: 0)
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+        .listRowBackground(Color.clear)
+        .accessibilityElement(children: .combine)
+    }
 
     private var settingsItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
