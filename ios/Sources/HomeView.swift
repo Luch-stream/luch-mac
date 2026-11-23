@@ -83,7 +83,6 @@ struct HomeView: View {
             }
             .navigationTitle("Luch")
             .toolbar { settingsItem }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 320)
         } detail: {
             if pageIndex == 0 {
                 receiveScreen
