@@ -30,8 +30,8 @@ struct HomeView: View {
     private var deviceName: String { UIDevice.current.name }
     /// The Android client switches to two columns at 840 dp; we use the same number.
     @State private var width: CGFloat = 0
-    /// Where the fold is, when the device is partially folded: nothing interactive may sit there.
-    @State private var foldMid: CGFloat?
+    /// The band of an active fold: content has to keep clear of it, not just of a centre line.
+    @State private var foldBand: CGRect?
     private var wide: Bool { width >= 840 }
 
     /// Both cards are this tall, so the dots and the container below never move.
@@ -87,13 +87,12 @@ struct HomeView: View {
 
     // MARK: - header
 
-    /// The middle of an active fold, or nil when the device is flat.
-    private static func foldCentre(in proxy: GeometryProxy) -> CGFloat? {
+    /// The band of an active fold, or nil when the device is flat.
+    private static func foldBand(in proxy: GeometryProxy) -> CGRect? {
         guard #available(iOS 27.1, *) else { return nil }
         let regions = proxy.reservedRegions(
             kind: .division, options: [.includeInactive], layoutDirectionBehavior: .fixed)
-        guard let active = regions.first(where: { $0.isActive }) else { return nil }
-        return active.frame.midX
+        return regions.first(where: { $0.isActive })?.frame
     }
 
     private var settingsItem: some ToolbarContent {
@@ -110,10 +109,7 @@ struct HomeView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
                 if wide {
-                    HStack(alignment: .top, spacing: 18) {
-                        receiveCard.frame(width: 420)
-                        sendersSection.frame(maxWidth: .infinity)
-                    }
+                    panes(receiveCard, sendersSection)
                 } else {
                     receiveCard
                     sendersSection
@@ -132,10 +128,7 @@ struct HomeView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
                 if wide {
-                    HStack(alignment: .top, spacing: 18) {
-                        sendCard.frame(width: 420)
-                        targetsSection.frame(maxWidth: .infinity)
-                    }
+                    panes(sendCard, targetsSection)
                 } else {
                     sendCard
                     targetsSection
@@ -150,16 +143,31 @@ struct HomeView: View {
         .overlay { widthReader }
     }
 
+    /// Wide screens hand the two columns to Apple's arrangement container: it knows the fold, the
+    /// reserved regions and how to rebalance the panes, and we do not.
+    @ViewBuilder
+    private func panes<A: View, B: View>(_ leading: A, _ trailing: B) -> some View {
+        if #available(iOS 27.1, *) {
+            ArrangementSplit(primary: leading, secondary: trailing)
+                .frame(height: 520)
+        } else {
+            HStack(alignment: .top, spacing: 18) {
+                leading.frame(width: 420)
+                trailing.frame(maxWidth: .infinity)
+            }
+        }
+    }
+
     private var widthReader: some View {
         GeometryReader { proxy in
             Color.clear
                 .onAppear {
                     width = proxy.size.width
-                    foldMid = Self.foldCentre(in: proxy)
+                    foldBand = Self.foldBand(in: proxy)
                 }
                 .onChange(of: proxy.size.width) { _, new in
                     width = new
-                    foldMid = Self.foldCentre(in: proxy)
+                    foldBand = Self.foldBand(in: proxy)
                 }
         }
     }
@@ -197,7 +205,7 @@ struct HomeView: View {
     }
 
     private var foldWidth: CGFloat {
-        if let foldMid { return max(180, foldMid - 28) }
+        if let foldBand { return max(180, foldBand.minX - 28) }
         return wide ? 320 : .infinity
     }
 
