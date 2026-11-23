@@ -231,3 +231,19 @@ final class Viewer {
         return generic.contains(name.lowercased()) ? "Компьютер" : name
     }
 }
+
+#if DEBUG
+extension Viewer {
+    /// Previews need senders without waiting for mDNS; the setter is file-private, so the seed lives here.
+    func seedPreviewSenders(_ names: [String]) {
+        senders = names.map { SenderBrowser.Sender(id: $0, name: $0) }
+    }
+
+    func seedPreviewStreaming(sender: String, fps: Double = 60, latency: Double = 12) {
+        phase = .streaming
+        senderName = sender
+        self.fps = fps
+        latencyMs = latency
+    }
+}
+#endif

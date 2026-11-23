@@ -42,7 +42,6 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
-        NavigationStack {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
@@ -61,6 +60,9 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     header
+
+                    modeSwitcher
+                        .frame(maxWidth: foldWidth)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
@@ -90,22 +92,6 @@ struct HomeView: View {
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                modeSwitcher
-                    .frame(maxWidth: 360)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundStyle(LuchStyle.primaryText)
-                }
-                .accessibilityLabel("Настройки")
-            }
-        }
-        .toolbarBackground(LuchStyle.background, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         }
         .onPreferenceChange(CardHeightKey.self) { heights in
             if let height = heights[0] { receiveHeight = height }
@@ -190,6 +176,15 @@ struct HomeView: View {
                     .lineLimit(1)
             }
 
+            Button(action: onSettings) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(LuchStyle.primaryText)
+                    .frame(width: 46, height: 46)
+                    .background(LuchStyle.surface, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Настройки")
         }
     }
 
@@ -251,7 +246,7 @@ struct HomeView: View {
                 .foregroundStyle(LuchStyle.primaryText)
                 .lineLimit(1)
             HStack(spacing: 8) {
-                chip(localAddress() ?? "без адреса")
+                chip(LocalAddress.preferred() ?? "без адреса")
                 chip("Wi-Fi · порт 47800")
             }
             Spacer(minLength: 0)
@@ -440,30 +435,4 @@ struct HomeView: View {
         configServer.target = target
     }
 
-    private func localAddress() -> String? {
-        var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return nil }
-        defer { freeifaddrs(head) }
-        var found: String?
-        var cur: UnsafeMutablePointer<ifaddrs>? = first
-        while let pointer = cur {
-            let flags = Int32(pointer.pointee.ifa_flags)
-            if let addr = pointer.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET),
-                flags & Int32(IFF_UP) != 0, flags & Int32(IFF_LOOPBACK) == 0
-            {
-                var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                if getnameinfo(
-                    addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0,
-                    NI_NUMERICHOST) == 0
-                {
-                    let text = String(cString: host)
-                    if text.hasPrefix("169.254.") { cur = pointer.pointee.ifa_next; continue }
-                    found = text
-                    if text.hasPrefix("192.168.") || text.hasPrefix("10.") { break }
-                }
-            }
-            cur = pointer.pointee.ifa_next
-        }
-        return found
-    }
 }
