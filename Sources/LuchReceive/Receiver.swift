@@ -275,6 +275,15 @@ final class ControlServer {
         case "start":
             let video = message["video"] as? [String: Any] ?? [:]
             let codecText = video["codec"] as? String ?? "video/avc"
+            // If the codec is not one this device has, say so instead of showing a frozen picture.
+            let audioCodec = (message["audio"] as? [String: Any])?["codec"] as? String
+            if let refused = refuseCodec(video: codecText, audio: audioCodec) {
+                control.send([
+                    "t": "error", "code": "codec", "detail": refused, "for": "start",
+                ])
+                owner?.onError?("Кодек \(refused) не поддерживается — нужен другой")
+                return true
+            }
             let width = (video["width"] as? NSNumber)?.intValue ?? 1920
             let height = (video["height"] as? NSNumber)?.intValue ?? 1080
             let fps = (video["fps"] as? NSNumber)?.intValue ?? 60
@@ -315,6 +324,14 @@ final class ControlServer {
             break
         }
         return true
+    }
+
+    /// What this device cannot decode, or nil when both codecs are fine.
+    private func refuseCodec(video: String, audio: String?) -> String? {
+        let videoOK = video == "video/hevc" || video == "video/avc"
+        guard videoOK else { return video }
+        if let audio, !audioCodecs.contains(audio) { return audio }
+        return nil
     }
 
     private func senderName(from control: Control) -> String {
