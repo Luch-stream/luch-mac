@@ -7,6 +7,9 @@ import Foundation
 import VideoToolbox
 
 final class ScreenEncoder {
+    /// The codec agreed with the receiver; a session that will not start falls back to the other.
+    enum Codec { case hevc, avc }
+
     /// (annex-b frame, pts in microseconds, isKeyframe)
     var onFrame: (([UInt8], UInt32, Bool) -> Void)?
     var onKeyframeRequest: (() -> Void)?
@@ -19,30 +22,35 @@ final class ScreenEncoder {
     private let width: Int
     private let height: Int
 
-    init?(width: Int, height: Int, fps: Int, bitrate: Int) {
+    init?(width: Int, height: Int, fps: Int, bitrate: Int, codec: Codec = .hevc) {
         self.width = width
         self.height = height
+        if let session = Self.make(width: width, height: height, codec: codec) {
+            self.session = session
+            configure(
+                session, codec: codec == .hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
+                fps: fps, bitrate: bitrate)
+            return
+        }
+        // The agreed codec will not start here: try the other family rather than send nothing.
+        let other: Codec = codec == .hevc ? .avc : .hevc
+        guard let session = Self.make(width: width, height: height, codec: other) else { return nil }
+        self.session = session
+        configure(
+            session, codec: other == .hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
+            fps: fps, bitrate: bitrate)
+    }
+
+    private static func make(width: Int, height: Int, codec: Codec) -> VTCompressionSession? {
         var session: VTCompressionSession?
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height),
-            codecType: kCMVideoCodecType_HEVC, encoderSpecification: nil,
-            imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil,
-            refcon: nil, compressionSessionOut: &session)
-        guard status == noErr, let session else {
-            // HEVC may be unavailable; fall back to H.264.
-            var fallback: VTCompressionSession?
-            let h264 = VTCompressionSessionCreate(
-                allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height),
-                codecType: kCMVideoCodecType_H264, encoderSpecification: nil,
-                imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil,
-                refcon: nil, compressionSessionOut: &fallback)
-            guard h264 == noErr, let fallback else { return nil }
-            self.session = fallback
-            configure(fallback, codec: kCMVideoCodecType_H264, fps: fps, bitrate: bitrate)
-            return
-        }
-        self.session = session
-        configure(session, codec: kCMVideoCodecType_HEVC, fps: fps, bitrate: bitrate)
+            codecType: codec == .hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
+            encoderSpecification: nil, imageBufferAttributes: nil,
+            compressedDataAllocator: nil, outputCallback: nil, refcon: nil,
+            compressionSessionOut: &session)
+        guard status == noErr else { return nil }
+        return session
     }
 
     private func configure(

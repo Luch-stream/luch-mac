@@ -39,7 +39,10 @@ final class SampleHandler: RPBroadcastSampleHandler {
         let scale = min(1.0, 1280.0 / Double(width))
         let outWidth = max(2, Int((Double(width) * scale) / 2) * 2)
         let outHeight = max(2, Int((Double(height) * scale) / 2) * 2)
-        guard let encoder = ScreenEncoder(width: outWidth, height: outHeight, fps: 30, bitrate: 6_000_000)
+        guard
+            let encoder = ScreenEncoder(
+                width: outWidth, height: outHeight, fps: 30, bitrate: 6_000_000,
+                codec: session?.negotiatedVideo == .avc ? .avc : .hevc)
         else {
             finish(reason: "Энкодер недоступен")
             return
