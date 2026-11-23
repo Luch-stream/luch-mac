@@ -7,7 +7,7 @@ import UIKit
 
 @available(iOS 27.1, *)
 struct HingeAngleReader: UIViewRepresentable {
-    /// Degrees between the two halves; nil when the hierarchy has no hinge (a flat phone, a tablet).
+    /// Degrees between the two halves (180 = flat open); nil when the hierarchy has no hinge.
     let onChange: (CGFloat?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -16,9 +16,18 @@ struct HingeAngleReader: UIViewRepresentable {
         let view = UIView(frame: .zero)
         view.isUserInteractionEnabled = false
         view.backgroundColor = .clear
-        context.coordinator.interaction = UIHingeInteraction { _, update in
-            onChange(update.hinge?.angle)
+        let interaction = UIHingeInteraction { _, update in
+            // UIKit reports radians; the screen thinks in degrees.
+            let degrees = update.hinge.map { $0.angle * 180 / .pi }
+            #if DEBUG
+                NSLog("Luch hinge: angle=%@° status=%@",
+                      degrees.map { String(format: "%.1f", $0) } ?? "nil",
+                      update.hinge.map { "\($0.status.rawValue)" } ?? "nil")
+            #endif
+            onChange(degrees)
         }
+        view.addInteraction(interaction)
+        context.coordinator.interaction = interaction
         return view
     }
 
