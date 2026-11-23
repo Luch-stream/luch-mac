@@ -62,7 +62,7 @@ struct HomeView: View {
                     header
 
                     modeSwitcher
-                        .frame(maxWidth: wide ? 320 : .infinity)
+                        .frame(maxWidth: foldWidth)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
