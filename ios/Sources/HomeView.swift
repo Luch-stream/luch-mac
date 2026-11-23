@@ -217,13 +217,6 @@ struct HomeView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
-            Text(sendStatus.isEmpty ? " " : sendStatus)
-                .font(.caption)
-                .foregroundStyle(LuchStyle.accent)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .frame(height: 18)
-
             if let chosen {
                 Button {
                     BroadcastStarter.present(target: chosen)
@@ -282,6 +275,14 @@ struct HomeView: View {
                 .tracking(1.1)
                 .foregroundStyle(LuchStyle.secondaryText)
                 .padding(.leading, 6)
+
+            if sending, !sendStatus.isEmpty {
+                Text(sendStatus)
+                    .font(.caption)
+                    .foregroundStyle(LuchStyle.accent)
+                    .lineLimit(2)
+                    .padding(.leading, 6)
+            }
 
             if sending {
                 list(
