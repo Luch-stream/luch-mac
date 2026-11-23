@@ -2,7 +2,7 @@ name: LuchiOS
 options:
   bundleIdPrefix: dev.luch
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
 packages:
   Luch:
     path: ..
@@ -61,4 +61,4 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_FILE: Broadcast/Info.plist
         SWIFT_VERSION: "6.0"
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"

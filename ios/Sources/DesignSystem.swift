@@ -209,3 +209,26 @@ struct AmbientBackdrop: View {
         .allowsHitTesting(false)
     }
 }
+
+/// The type scale of the design, expressed with the system styles so Dynamic Type works: the
+/// Android client's sp sizes sit on the same rhythm, and `sans-serif-medium` becomes a weight here.
+enum LuchType {
+    /// Brand line: 26 sp on Android, the closest system style is Title 2 at medium weight.
+    static let brand = Font.title2.weight(.medium)
+    /// The mode pills: 16 sp, semibold when selected.
+    static let pill = Font.callout.weight(.semibold)
+    static let pillWide = Font.title3.weight(.semibold)
+    /// Primary button: 17 sp.
+    static let button = Font.body.weight(.medium)
+    /// Section caption, drawn uppercase: 12 sp.
+    static let caption = Font.caption.weight(.medium)
+    /// A device row: 18 sp title, 15 sp subtitle.
+    static let rowTitle = Font.body
+    static let rowSub = Font.subheadline
+    /// A list name that is not a device row: 15 sp.
+    static let listName = Font.subheadline
+    /// Big number and its unit on the stats line: 36 / 20 sp, unit 16 sp.
+    static let statValue = Font.largeTitle
+    static let statValueSmall = Font.title3
+    static let statUnit = Font.callout
+}

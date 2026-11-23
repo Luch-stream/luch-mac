@@ -81,9 +81,26 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(LuchStyle.background.ignoresSafeArea())
-            .navigationTitle("Luch")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack {
+                        Image("LuchMark")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(LuchStyle.accent)
+                            .frame(width: 26, height: 26)
+
+                        Text("Luch")
+                            .font(LuchType.brand)
+                            .foregroundStyle(LuchStyle.accent)
+                            .fixedSize()
+                    }
+                    .padding()
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onSettings) {
                         Image(systemName: "gearshape.fill")
@@ -297,7 +314,7 @@ struct HomeView: View {
                     BroadcastStarter.present(target: chosen)
                 } label: {
                     Text("Начать трансляцию")
-                        .font(.callout.weight(.semibold))
+                        .font(LuchType.button)
                         .foregroundStyle(.black)
                         .padding(.horizontal, 22)
                         .padding(.vertical, 11)
@@ -346,7 +363,7 @@ struct HomeView: View {
     private var bottomContainer: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(sending ? "ПРИЁМНИКИ РЯДОМ" : "ОТПРАВИТЕЛИ РЯДОМ")
-                .font(.caption.weight(.semibold))
+                .font(LuchType.caption)
                 .tracking(1.1)
                 .foregroundStyle(LuchStyle.secondaryText)
                 .padding(.leading, 6)
