@@ -56,7 +56,7 @@ struct ContentView: View {
     private var receiving: some View {
             switch viewer.phase {
             case .waiting:
-                WaitingView(deviceName: UIDevice.current.name, senders: viewer.senders, pageIndex: pageIndex, onSettings: presentSettings)
+                HomeView(viewer: viewer, pageIndex: pageIndex, onSettings: presentSettings)
                     .transition(.opacity)
             case .streaming:
                 StreamView(

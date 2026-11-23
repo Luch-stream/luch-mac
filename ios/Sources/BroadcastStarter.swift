@@ -38,14 +38,15 @@ enum BroadcastStarter {
     final class Delegate: NSObject, RPBroadcastActivityViewControllerDelegate {
         static let shared = Delegate()
 
-        @MainActor
-        func broadcastActivityViewController(
+        nonisolated func broadcastActivityViewController(
             _ controller: RPBroadcastActivityViewController,
             didFinishWith broadcastController: RPBroadcastController?,
             error: Error?
         ) {
-            controller.dismiss(animated: true)
-            broadcastController?.startBroadcast { _ in }
+            Task { @MainActor in
+                controller.dismiss(animated: true)
+                broadcastController?.startBroadcast { _ in }
+            }
         }
     }
 }
