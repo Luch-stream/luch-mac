@@ -1,4 +1,8 @@
 name: LuchiOS
+settings:
+  base:
+    # Both targets call libopus from Swift; one project-level header keeps them equal.
+    SWIFT_OBJC_BRIDGING_HEADER: Sources/OpusShim.h
 options:
   bundleIdPrefix: dev.luch
   deploymentTarget:
@@ -10,9 +14,6 @@ targets:
   LuchiOS:
     type: application
     platform: iOS
-    settings:
-      base:
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/OpusShim.h
     sources:
       - path: Sources
         excludes: [Broadcast]

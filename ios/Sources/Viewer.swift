@@ -38,7 +38,7 @@ final class Viewer {
     @ObservationIgnored let relay = VideoRelay()
     /// Weak: SwiftUI owns the view, and a session must not keep a dismantled one alive.
     @ObservationIgnored private weak var surface: VideoSurfaceView?
-    @ObservationIgnored private var audio: PcmSink?
+    @ObservationIgnored private var audio: (any AudioSink)?
     @ObservationIgnored private var receiver: Receiver?
     @ObservationIgnored let browser = SenderBrowser()
     @ObservationIgnored private var senderTask: Task<Void, Never>?
@@ -73,7 +73,10 @@ final class Viewer {
             name: deviceName, sink: relay, audioCodecs: CodecSettings.audio.codecs,
             videoPreference: CodecSettings.video.codec)
         receiver.makeAudio = { [weak self] fd in
-            let sink = PcmSink(fd: fd)
+            // The sender names the audio codec in its start message; Opus needs the decoder path.
+            let sink: AudioSink =
+                receiver.audioCodec?.contains("opus") == true
+                ? OpusSink(fd: fd) : PcmSink(fd: fd)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.audio = sink }
             }

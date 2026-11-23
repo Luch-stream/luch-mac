@@ -14,7 +14,8 @@ for pair in "device:iphoneos" "sim:iphonesimulator"; do
     name=${pair%%:*}
     sdk=${pair##*:}
     cmake -S "$WORK/src" -B "$WORK/build-$name" -G Xcode \
-        -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+        -DCMAKE_SYSTEM_NAME=iOS \
+        -DCMAKE_OSX_ARCHITECTURES="$([ "$name" = sim ] && echo 'arm64;x86_64' || echo arm64)" \
         -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_OSX_SYSROOT="$sdk" \
         -DOPUS_BUILD_SHARED_LIBRARY=OFF -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF >/dev/null
     cmake --build "$WORK/build-$name" --config Release --target opus -- -quiet

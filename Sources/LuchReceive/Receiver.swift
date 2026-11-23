@@ -23,6 +23,9 @@ public final class Receiver: @unchecked Sendable {
     public var makeAudio: ((Int32) -> AudioSink?)?
     /// Codecs this receiver advertised in its welcome.
     public let audioCodecs: [String]
+    /// The audio codec the current sender chose; nil when it sends no sound.
+    /// Written by the control server when a sender starts; read by the app to pick a decoder.
+    public fileprivate(set) var audioCodec: String?
     /// The codec the person chose in settings; nil keeps the hardware order.
     private let videoPreference: String?
 
@@ -277,6 +280,7 @@ final class ControlServer {
             let codecText = video["codec"] as? String ?? "video/avc"
             // If the codec is not one this device has, say so instead of showing a frozen picture.
             let audioCodec = (message["audio"] as? [String: Any])?["codec"] as? String
+            owner?.audioCodec = audioCodec
             if let refused = refuseCodec(video: codecText, audio: audioCodec) {
                 control.send([
                     "t": "error", "code": "codec", "detail": refused, "for": "start",
