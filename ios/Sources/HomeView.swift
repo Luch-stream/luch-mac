@@ -30,6 +30,8 @@ struct HomeView: View {
     private var deviceName: String { UIDevice.current.name }
     /// The Android client switches to two columns at 840 dp; we use the same number.
     @State private var width: CGFloat = 0
+    /// Where the fold is, when the device is partially folded: nothing interactive may sit there.
+    @State private var foldMid: CGFloat?
     private var wide: Bool { width >= 840 }
 
     /// Both cards are this tall, so the dots and the container below never move.
@@ -40,42 +42,34 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
+        NavigationStack {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
             GeometryReader { proxy in
-                Color.clear.onAppear { width = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, new in width = new }
+                Color.clear
+                    .onAppear {
+                        width = proxy.size.width
+                        foldMid = Self.foldCentre(in: proxy)
+                    }
+                    .onChange(of: proxy.size.width) { _, new in
+                        width = new
+                        foldMid = Self.foldCentre(in: proxy)
+                    }
             }
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
-                    header
-                        .padding(.horizontal, 20)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
-                            VStack(spacing: 14) {
-                                // No pager: the switcher chooses the card, and a page view would
-                                // swallow the horizontal gestures the list underneath needs.
-                                Group {
-                                    if pageIndex == 0 {
-                                        receiveCard
-                                    } else {
-                                        sendCard
-                                    }
-                                }
-                                .frame(height: cardHeight, alignment: .top)
-                            }
-                            .frame(width: 420)
-
+                            cardColumn
+                                .frame(width: 420)
                             bottomContainer
                                 .frame(maxWidth: .infinity)
                         }
                         .padding(.horizontal, 20)
                     } else {
-                        // The phone keeps the explicit switcher too, above the card it pages.
-                        modeSwitcher
                         Group {
                             if pageIndex == 0 {
                                 receiveCard
@@ -95,6 +89,25 @@ struct HomeView: View {
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                lblLogo
+            }
+            ToolbarItem(placement: .principal) {
+                modeSwitcher
+                    .frame(maxWidth: 320)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundStyle(LuchStyle.primaryText)
+                }
+                .accessibilityLabel("Настройки")
+            }
+        }
+        .toolbarBackground(LuchStyle.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         }
         .onPreferenceChange(CardHeightKey.self) { heights in
             if let height = heights[0] { receiveHeight = height }
@@ -117,6 +130,15 @@ struct HomeView: View {
 
     // MARK: - header
 
+    /// The middle of an active fold, or nil when the device is flat.
+    private static func foldCentre(in proxy: GeometryProxy) -> CGFloat? {
+        guard #available(iOS 27.1, *) else { return nil }
+        let regions = proxy.reservedRegions(
+            kind: .division, options: [.includeInactive], layoutDirectionBehavior: .fixed)
+        guard let active = regions.first(where: { $0.isActive }) else { return nil }
+        return active.frame.midX
+    }
+
     private var modeSwitcher: some View {
         Picker("Режим", selection: $pageIndex) {
             Text("Принимать").tag(0)
@@ -124,8 +146,35 @@ struct HomeView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.large)
-        // Phone: the full safe-area width. Wide: a comfortable fixed width, centred.
-        .frame(maxWidth: wide ? 320 : .infinity)
+        // Phone: the full safe-area width. Wide: a comfortable fixed width, centred. Folded: only
+        // as wide as the leading half, so the segments never sit in the crease.
+        .frame(maxWidth: foldWidth)
+    }
+
+    private var cardColumn: some View {
+        Group {
+            if pageIndex == 0 {
+                receiveCard
+            } else {
+                sendCard
+            }
+        }
+        .frame(height: cardHeight, alignment: .top)
+    }
+
+    private var foldWidth: CGFloat {
+        if let foldMid { return max(180, foldMid - 28) }
+        return wide ? 320 : .infinity
+    }
+
+    private var lblLogo: some View {
+        // Only the mark: a word next to it does not fit the leading slot of a navigation bar.
+        Image("LuchMark")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(LuchStyle.accent)
+            .frame(width: 22, height: 22)
     }
 
     private var header: some View {
