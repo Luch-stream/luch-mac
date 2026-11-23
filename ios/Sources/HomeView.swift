@@ -1,16 +1,9 @@
-// The home screen: one header, one card that pages between receiving and sending, dots under it,
-// and a container underneath that is rebuilt for whichever half is showing. The card keeps a fixed
-// height so nothing jumps when the page changes.
+// The home screen: two tabs, one per mode, each a plain List — status on top, the room around the
+// device below. No cards, no measured heights, no fold arithmetic: List and TabView already handle
+// safe areas, the fold, Dynamic Type and selection.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 import UIKit
-
-private struct CardHeightKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { $1 })
-    }
-}
 
 struct HomeView: View {
     let viewer: Viewer
@@ -24,35 +17,26 @@ struct HomeView: View {
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
-    private var sending: Bool { pageIndex == 1 }
     private var deviceName: String { UIDevice.current.name }
-    /// The Android client switches to two columns at 840 dp; we use the same number.
-    @State private var width: CGFloat = 0
-    /// The band of an active fold: content has to keep clear of it, not just of a centre line.
-    @State private var foldBand: CGRect?
-    private var wide: Bool { width >= 840 }
-
-    /// Both cards are this tall, so the dots and the container below never move.
-    /// Measured, not guessed: the pager is as tall as the taller of the two cards, so neither
-    /// leaves a gap nor spills over the list underneath.
-    @State private var receiveHeight: CGFloat = 0
-    @State private var sendHeight: CGFloat = 0
-    private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
         TabView(selection: $pageIndex) {
-            receiveTab
-            .tabItem {
-                Label("Принимать", systemImage: "wifi")
+            NavigationStack {
+                receiveList
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
             }
+            .tabItem { Label("Принимать", systemImage: "wifi") }
             .tag(0)
 
-            sendTab
-            .tabItem {
-                Label("Отправлять", systemImage: "rectangle.dashed.badge.record")
+            NavigationStack {
+                sendList
+                    .navigationTitle("Luch")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar { settingsItem }
             }
+            .tabItem { Label("Отправлять", systemImage: "rectangle.dashed.badge.record") }
             .tag(1)
         }
         .tint(LuchStyle.accent)
@@ -71,15 +55,98 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - header
+    // MARK: - tabs
 
-    /// The band of an active fold, or nil when the device is flat.
-    private static func foldBand(in proxy: GeometryProxy) -> CGRect? {
-        guard #available(iOS 27.1, *) else { return nil }
-        let regions = proxy.reservedRegions(
-            kind: .division, options: [.includeInactive], layoutDirectionBehavior: .fixed)
-        return regions.first(where: { $0.isActive })?.frame
+    private var receiveList: some View {
+        List {
+            Section {
+                statusRow(
+                    symbol: "wifi",
+                    title: "Готов принимать",
+                    subtitle: "Телефон виден в сети как «\(deviceName)»",
+                    footnote: [LocalAddress.preferred(), "Wi-Fi", "порт 47800"]
+                        .compactMap { $0 }.joined(separator: " · "))
+            }
+
+            Section("Отправители рядом") {
+                if viewer.senders.isEmpty {
+                    ContentUnavailableView(
+                        "Пока не найдены",
+                        systemImage: "laptopcomputer",
+                        description: Text("Откройте Luch на компьютере в этой же сети"))
+                } else {
+                    ForEach(viewer.senders) { sender in
+                        Label(sender.name, systemImage: "laptopcomputer")
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(LuchStyle.background)
     }
+
+    private var sendList: some View {
+        List {
+            Section {
+                statusRow(
+                    symbol: "rectangle.dashed.badge.record",
+                    title: chosen == nil ? "Куда показывать" : "Показываем на",
+                    subtitle: chosen?.name ?? "Выберите приёмник ниже",
+                    footnote: sendStatus.isEmpty ? nil : sendStatus,
+                    footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent)
+            }
+
+            Section("Приёмники рядом") {
+                if targets.isEmpty {
+                    ContentUnavailableView(
+                        "Пока не найдены",
+                        systemImage: "display",
+                        description: Text("Приёмник должен быть в этой же сети"))
+                } else {
+                    ForEach(targets) { target in
+                        Button {
+                            chosen = target
+                            prepare(target)
+                        } label: {
+                            HStack {
+                                Label(target.name, systemImage: "display")
+                                    .foregroundStyle(LuchStyle.primaryText)
+                                Spacer(minLength: 0)
+                                if chosen?.id == target.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(LuchStyle.accent)
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if let chosen {
+                Section {
+                    Button {
+                        BroadcastStarter.present(target: chosen)
+                    } label: {
+                        Text("Начать трансляцию")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(LuchStyle.background)
+    }
+
+    // MARK: - pieces
 
     private var settingsItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
@@ -91,380 +158,38 @@ struct HomeView: View {
         }
     }
 
-    /// Apple's own two-pane container: a sidebar with the card and a detail with the list. On a phone
-    /// it collapses by itself, so the same screen works everywhere.
-    private var receiveTab: some View {
-        Group {
-            if wide {
-                NavigationSplitView {
-                    receiveCard
-                        .padding(20)
-                        .navigationTitle("Luch")
-                        .toolbar { settingsItem }
-                } detail: {
-                    sendersSection
-                        .padding(20)
-                        .navigationTitle("Отправители рядом")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                NavigationStack {
-                    receiveScreen
-                        .navigationTitle("Luch")
-                        .navigationBarTitleDisplayMode(.large)
-                        .toolbar { settingsItem }
-                        .toolbarBackground(LuchStyle.background, for: .navigationBar)
-                        .toolbarBackground(.visible, for: .navigationBar)
-                }
-            }
-        }
-        .background(LuchStyle.background.ignoresSafeArea())
-    }
-
-    private var sendTab: some View {
-        Group {
-            if wide {
-                NavigationSplitView {
-                    sendCard
-                        .padding(20)
-                        .navigationTitle("Luch")
-                        .toolbar { settingsItem }
-                } detail: {
-                    targetsSection
-                        .padding(20)
-                        .navigationTitle("Приёмники рядом")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                NavigationStack {
-                    sendScreen
-                        .navigationTitle("Luch")
-                        .navigationBarTitleDisplayMode(.large)
-                        .toolbar { settingsItem }
-                        .toolbarBackground(LuchStyle.background, for: .navigationBar)
-                        .toolbarBackground(.visible, for: .navigationBar)
-                }
-            }
-        }
-        .background(LuchStyle.background.ignoresSafeArea())
-    }
-
-    private var receiveScreen: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                receiveCard
-                sendersSection
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 28)
-            .frame(maxWidth: wide ? 920 : 520)
-            .frame(maxWidth: .infinity)
-        }
-        .background(LuchStyle.background.ignoresSafeArea())
-        .overlay { widthReader }
-    }
-
-    private var sendScreen: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                sendCard
-                targetsSection
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 28)
-            .frame(maxWidth: wide ? 920 : 520)
-            .frame(maxWidth: .infinity)
-        }
-        .background(LuchStyle.background.ignoresSafeArea())
-        .overlay { widthReader }
-    }
-
-    private var widthReader: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onAppear {
-                    width = proxy.size.width
-                    foldBand = Self.foldBand(in: proxy)
-                }
-                .onChange(of: proxy.size.width) { _, new in
-                    width = new
-                    foldBand = Self.foldBand(in: proxy)
-                }
-        }
-    }
-
-    private var sendersSection: some View {
-        list(
-            viewer.senders.map { ($0.id, $0.name, "") },
-            empty: "Пока не найдены",
-            selected: nil,
-            icon: "laptopcomputer",
-            onTap: { _ in })
-    }
-
-    private var targetsSection: some View {
-        list(
-            targets.map { ($0.id, $0.name, $0.model) },
-            empty: "Пока не найдены",
-            selected: chosen?.id,
-            icon: "display",
-            onTap: { id in
-                chosen = targets.first { $0.id == id }
-                if let chosen { prepare(chosen) }
-            })
-    }
-
-    private var cardColumn: some View {
-        Group {
-            if pageIndex == 0 {
-                receiveCard
-            } else {
-                sendCard
-            }
-        }
-        .frame(height: cardHeight, alignment: .top)
-    }
-
-    private var foldWidth: CGFloat {
-        if let foldBand { return max(180, foldBand.minX - 28) }
-        return wide ? 320 : .infinity
-    }
-
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image("LuchMark")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(LuchStyle.accent)
-                .frame(width: 26, height: 26)
-                .frame(width: 52, height: 52)
-                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            Text("Luch")
-                .font(.largeTitle.weight(.bold))
-                .foregroundStyle(LuchStyle.accent)
-
-            Spacer(minLength: 0)
-
-            if wide {
-                Text(deviceName)
-                    .font(.footnote)
-                    .foregroundStyle(LuchStyle.secondaryText)
-                    .lineLimit(1)
-            }
-
-            Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(LuchStyle.primaryText)
-                    .frame(width: 46, height: 46)
-                    .background(LuchStyle.surface, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Настройки")
-        }
-    }
-
-    // MARK: - cards
-
-    private var receiveCard: some View {
-        VStack(spacing: 10) {
-            cardIcon("wifi")
-            Text("Готов принимать")
-                .font(.title.weight(.bold))
-                .foregroundStyle(LuchStyle.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text("Телефон виден в сети как")
-                .font(.subheadline)
-                .foregroundStyle(LuchStyle.secondaryText)
-            Text(deviceName)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(LuchStyle.primaryText)
-                .lineLimit(1)
-            HStack(spacing: 8) {
-                chip(LocalAddress.preferred() ?? "без адреса")
-                chip("Wi-Fi · порт 47800")
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        // Without this the card would shrink to its text and sit in the middle of the page.
-        .frame(maxWidth: .infinity)
-        .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: CardHeightKey.self, value: [0: proxy.size.height])
-            }
-        }
-    }
-
-    private var sendCard: some View {
-        VStack(spacing: 10) {
-            cardIcon("rectangle.dashed.badge.record")
-            Text("Куда показывать")
-                .font(.title.weight(.bold))
-                .foregroundStyle(LuchStyle.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(chosen?.name ?? "Выберите приёмник ниже")
-                .font(chosen == nil ? .subheadline : .title3.weight(.semibold))
-                .foregroundStyle(chosen == nil ? LuchStyle.secondaryText : LuchStyle.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            if let chosen {
-                Button {
-                    BroadcastStarter.present(target: chosen)
-                } label: {
-                    Text("Начать трансляцию")
-                        .font(LuchType.button)
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 11)
-                        .background(LuchStyle.accent, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .frame(height: 44)
-            } else {
-                Color.clear.frame(height: 44)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        // Without this the card would shrink to its text and sit in the middle of the page.
-        .frame(maxWidth: .infinity)
-        .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: CardHeightKey.self, value: [1: proxy.size.height])
-            }
-        }
-    }
-
-    private func cardIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 26, weight: .semibold))
-            .foregroundStyle(LuchStyle.accent)
-            .frame(width: 64, height: 64)
-            .background(LuchStyle.accent.opacity(0.14), in: Circle())
-    }
-
-    private func chip(_ text: String) -> some View {
-        Text(text)
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(LuchStyle.primaryText)
-            .lineLimit(1)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .overlay { Capsule().strokeBorder(LuchStyle.separator, lineWidth: 1) }
-    }
-
-    // MARK: - the container under the card
-
-    @ViewBuilder
-    private var bottomContainer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(sending ? "ПРИЁМНИКИ РЯДОМ" : "ОТПРАВИТЕЛИ РЯДОМ")
-                .font(LuchType.caption)
-                .tracking(1.1)
-                .foregroundStyle(LuchStyle.secondaryText)
-                .padding(.leading, 6)
-
-            if sending, !sendStatus.isEmpty {
-                Text(sendStatus)
-                    .font(.caption)
-                    .foregroundStyle(LuchStyle.accent)
-                    .lineLimit(2)
-                    .padding(.leading, 6)
-            }
-
-            if sending {
-                list(
-                    targets.map { ($0.id, $0.name, $0.model) },
-                    empty: "Пока не найдены",
-                    selected: chosen?.id,
-                    icon: "display",
-                    onTap: { id in
-                        chosen = targets.first { $0.id == id }
-                        if let chosen { prepare(chosen) }
-                    })
-            } else {
-                list(
-                    viewer.senders.map { ($0.id, $0.name, "") },
-                    empty: "Пока не найдены",
-                    selected: nil,
-                    icon: "laptopcomputer",
-                    onTap: { _ in })
-            }
-        }
-    }
-
-    private func list(
-        _ rows: [(String, String, String)], empty: String, selected: String?, icon: String,
-        onTap: @escaping (String) -> Void
+    /// A status line: a symbol, the mode, what it means, and a small footnote.
+    private func statusRow(
+        symbol: String,
+        title: String,
+        subtitle: String,
+        footnote: String?,
+        footnoteTint: Color? = nil
     ) -> some View {
-        Group {
-            if rows.isEmpty {
-                Text(empty)
-                    .font(.callout)
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(LuchStyle.accent)
+                .frame(width: 34, alignment: .center)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(LuchStyle.primaryText)
+                Text(subtitle)
+                    .font(.subheadline)
                     .foregroundStyle(LuchStyle.secondaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 18)
-                    .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(rows, id: \.0) { row in
-                        Button {
-                            onTap(row.0)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: icon)
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(LuchStyle.accent)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.1)
-                                        .font(.callout.weight(.medium))
-                                        .foregroundStyle(LuchStyle.primaryText)
-                                        .lineLimit(1)
-                                    if !row.2.isEmpty {
-                                        Text(row.2)
-                                            .font(.caption)
-                                            .foregroundStyle(LuchStyle.secondaryText)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                                if selected == row.0 {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(LuchStyle.accent)
-                                }
-                            }
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 14)
-                            // The whole row is the tap target, not just the label and the icon.
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-                        if row.0 != rows.last?.0 {
-                            Rectangle()
-                                .fill(LuchStyle.separator)
-                                .frame(height: 0.5)
-                                .padding(.leading, 48)
-                        }
-                    }
+                if let footnote {
+                    Text(footnote)
+                        .font(.caption)
+                        .foregroundStyle(footnoteTint ?? LuchStyle.secondaryText)
+                        .padding(.top, 2)
                 }
-                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - actions
@@ -476,10 +201,3 @@ struct HomeView: View {
         configServer.target = target
     }
 }
-
-#if DEBUG
-#Preview {
-    HomeView(viewer: .previewReceivingSenders, pageIndex: .constant(0), onSettings: {})
-        .preferredColorScheme(.dark)
-}
-#endif
