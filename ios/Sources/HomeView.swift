@@ -42,6 +42,7 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
+        NavigationStack {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
@@ -60,9 +61,6 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     header
-
-                    modeSwitcher
-                        .frame(maxWidth: foldWidth)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
@@ -92,6 +90,22 @@ struct HomeView: View {
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                modeSwitcher
+                    .frame(maxWidth: 360)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundStyle(LuchStyle.primaryText)
+                }
+                .accessibilityLabel("Настройки")
+            }
+        }
+        .toolbarBackground(LuchStyle.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         }
         .onPreferenceChange(CardHeightKey.self) { heights in
             if let height = heights[0] { receiveHeight = height }
@@ -176,15 +190,6 @@ struct HomeView: View {
                     .lineLimit(1)
             }
 
-            Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(LuchStyle.primaryText)
-                    .frame(width: 46, height: 46)
-                    .background(LuchStyle.surface, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Настройки")
         }
     }
 
