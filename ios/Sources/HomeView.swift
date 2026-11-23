@@ -49,8 +49,7 @@ struct HomeView: View {
                                     receiveCard.tag(0)
                                     sendCard.tag(1)
                                 }
-                                .tabViewStyle(.page(indexDisplayMode: .always))
-                                .indexViewStyle(.page(backgroundDisplayMode: .never))
+                                .tabViewStyle(.page(indexDisplayMode: .never))
                                 .frame(height: cardHeight)
                             }
                             .frame(width: 420)
@@ -69,8 +68,7 @@ struct HomeView: View {
                             receiveCard.tag(0)
                             sendCard.tag(1)
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .always))
-                        .indexViewStyle(.page(backgroundDisplayMode: .never))
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                         .frame(height: cardHeight)
 
                         bottomContainer
@@ -177,7 +175,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
-        .padding(.bottom, 20)
     }
 
     private var sendCard: some View {
@@ -228,7 +225,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, 20)
-        .padding(.bottom, 20)
     }
 
     private func cardIcon(_ symbol: String) -> some View {
