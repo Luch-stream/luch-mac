@@ -16,6 +16,8 @@ struct HomeView: View {
     @State private var configServer = ConfigServer()
     @State private var browseTask: Task<Void, Never>?
     @State private var sendStatus = ""
+    /// Live hinge angle in degrees; nil when this device has no hinge or is flat open.
+    @State private var hingeAngle: CGFloat?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -34,6 +36,7 @@ struct HomeView: View {
         }
         .tint(LuchStyle.accent)
         .background(LuchStyle.background)
+        .readingHinge { angle in hingeAngle = angle }
         .task {
             configServer.onStatus = { line in sendStatus = line }
             configServer.start()
@@ -328,6 +331,9 @@ struct HomeView: View {
         }
         for label in DeviceCapabilities.labels(for: CodecSettings.audio.codecs) {
             chips.append(Chip(label, "waveform"))
+        }
+        if let hingeAngle, hingeAngle < 175 {
+            chips.append(Chip("\(Int(hingeAngle.rounded()))°", "book.closed"))
         }
         return chips
     }
