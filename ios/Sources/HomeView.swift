@@ -42,7 +42,6 @@ struct HomeView: View {
     private var cardHeight: CGFloat { max(260, receiveHeight, sendHeight) }
 
     var body: some View {
-        NavigationStack {
         ZStack {
             LuchStyle.background.ignoresSafeArea()
 
@@ -59,7 +58,11 @@ struct HomeView: View {
             }
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
+                    header
+
+                    modeSwitcher
+                        .frame(maxWidth: wide ? 320 : .infinity)
 
                     if wide {
                         HStack(alignment: .top, spacing: 18) {
@@ -84,30 +87,11 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 6)
+                .padding(.top, 0)
                 .padding(.bottom, 28)
                 .frame(maxWidth: wide ? 920 : 520)
                 .frame(maxWidth: .infinity)
             }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                lblLogo
-            }
-            ToolbarItem(placement: .principal) {
-                modeSwitcher
-                    .frame(maxWidth: 320)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundStyle(LuchStyle.primaryText)
-                }
-                .accessibilityLabel("Настройки")
-            }
-        }
-        .toolbarBackground(LuchStyle.background, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         }
         .onPreferenceChange(CardHeightKey.self) { heights in
             if let height = heights[0] { receiveHeight = height }
@@ -167,17 +151,44 @@ struct HomeView: View {
         return wide ? 320 : .infinity
     }
 
-    private var lblLogo: some View {
-        // Only the mark: a word next to it does not fit the leading slot of a navigation bar.
-        Image("LuchMark")
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .foregroundStyle(LuchStyle.accent)
-            .frame(width: 22, height: 22)
-    }
 
     private var header: some View {
+        HStack(spacing: 12) {
+            Image("LuchMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(LuchStyle.accent)
+                .frame(width: 26, height: 26)
+                .frame(width: 52, height: 52)
+                .background(LuchStyle.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text("Luch")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(LuchStyle.accent)
+
+            Spacer(minLength: 0)
+
+            if wide {
+                Text(deviceName)
+                    .font(.footnote)
+                    .foregroundStyle(LuchStyle.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Button(action: onSettings) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(LuchStyle.primaryText)
+                    .frame(width: 46, height: 46)
+                    .background(LuchStyle.surface, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Настройки")
+        }
+    }
+
+    private var headerOld: some View {
         HStack(spacing: 12) {
             Image("LuchMark")
                 .renderingMode(.template)
