@@ -126,8 +126,11 @@ struct HomeView: View {
             symbol: "wifi",
             title: "Готов принимать",
             subtitle: "Телефон виден в сети как «\(deviceName)»",
-            footnote: [LocalAddress.preferred(), "Wi-Fi", "порт 47800"]
-                .compactMap { $0 }.joined(separator: " · "))
+            footnote: nil,
+            chips: [
+                [LocalAddress.preferred(), "Wi-Fi"].compactMap { $0 }.joined(separator: " · "),
+                "порт 47800", "HEVC", "PCM",
+            ])
     }
 
     private var sendStatusRow: some View {
@@ -136,7 +139,11 @@ struct HomeView: View {
             title: chosen == nil ? "Куда показывать" : "Показываем на",
             subtitle: chosen?.name ?? "Выберите приёмник ниже",
             footnote: sendStatus.isEmpty ? nil : sendStatus,
-            footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent)
+            footnoteTint: sendStatus.isEmpty ? nil : LuchStyle.accent,
+            chips: chosen == nil
+                ? ["HEVC", "PCM", "порт 47800"]
+                : [chosen?.host ?? "", "порт \(chosen?.port ?? 0)", "HEVC", "PCM"]
+                    .filter { !$0.isEmpty })
     }
 
     @ViewBuilder
@@ -158,7 +165,8 @@ struct HomeView: View {
         title: String,
         subtitle: String,
         footnote: String?,
-        footnoteTint: Color? = nil
+        footnoteTint: Color? = nil,
+        chips: [String] = []
     ) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol)
@@ -174,6 +182,12 @@ struct HomeView: View {
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(LuchStyle.secondaryText)
+                if !chips.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(chips, id: \.self) { chip($0) }
+                    }
+                    .padding(.top, 4)
+                }
                 if let footnote {
                     Text(footnote)
                         .font(.caption)
@@ -296,6 +310,18 @@ struct HomeView: View {
             }
             .accessibilityLabel("Настройки")
         }
+    }
+
+    /// A small capsule for a fact that reads as a tag: port, codec, audio.
+    private func chip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(LuchStyle.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(LuchStyle.background, in: Capsule())
+            .overlay { Capsule().strokeBorder(LuchStyle.separator, lineWidth: 1) }
+            .fixedSize()
     }
 
     // MARK: - actions
